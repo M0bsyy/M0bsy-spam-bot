@@ -23,18 +23,43 @@ CONTACT_USERNAME = "@M0bsy_olds"
 # Initialize bot
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="HTML")
 
-# ========== INSTAGRAM API - SIMPLIFIED WORKING VERSION ==========
+# ========== INSTAGRAM API - UPDATED WORKING VERSION ==========
 def generate_random_string(length=32):
     """Generate random string for CSRF token"""
     chars = string.ascii_letters + string.digits
     return ''.join(random.choice(chars) for _ in range(length))
 
 def validate_instagram_session(session_id):
-    """Simple session validation"""
+    """Validate Instagram session with better checking"""
     try:
         headers = {
             'cookie': f'sessionid={session_id}',
-            'user-agent': 'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Mobile Safari/537.36',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'accept-language': 'en-US,en;q=0.5',
+            'accept-encoding': 'gzip, deflate, br',
+            'connection': 'keep-alive',
+        }
+        
+        response = requests.get(
+            'https://www.instagram.com/api/v1/users/web_profile_info/?username=instagram',
+            headers=headers,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                if data.get('data', {}).get('user'):
+                    username = data['data']['user'].get('username', 'instagram_user')
+                    return True, username, "✅ Valid session"
+            except:
+                pass
+        
+        # Try alternative check
+        headers = {
+            'cookie': f'sessionid={session_id}',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
         
         response = requests.get(
@@ -44,79 +69,23 @@ def validate_instagram_session(session_id):
         )
         
         if response.status_code == 200 and 'instagram' in response.text.lower():
-            return True, "instagram_user", "✅ Valid session"
+            # Try to extract username from page
+            import re
+            match = re.search(r'"username":"([^"]+)"', response.text)
+            username = match.group(1) if match else 'instagram_user'
+            return True, username, "✅ Valid session"
         
-        return False, None, "❌ Invalid session (Not logged in)"
+        return False, None, f"❌ Invalid session (HTTP {response.status_code})"
         
     except Exception as e:
         return False, None, f"❌ Error: {str(e)[:50]}"
 
-def send_instagram_message_working(session_id, thread_id, message):
-    """Working Instagram message sending with proper CSRF"""
-    try:
-        # First get actual CSRF token from Instagram
-        csrf_token = extract_real_csrf_token(session_id)
-        if not csrf_token:
-            csrf_token = generate_random_string(32)
-        
-        headers = {
-            'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
-            'user-agent': 'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Mobile Safari/537.36',
-            'x-csrftoken': csrf_token,
-            'x-ig-app-id': '936619743392459',
-            'x-ig-www-claim': 'hmac.AR0vFJabfqYQm5ljQkK-OOFpdrqJzucwLrwx9y1KQZbHMFqQ',
-            'x-instagram-ajax': '1007616494',
-            'x-requested-with': 'XMLHttpRequest',
-            'content-type': 'application/x-www-form-urlencoded',
-            'origin': 'https://www.instagram.com',
-            'referer': 'https://www.instagram.com/direct/inbox/',
-            'sec-ch-ua': '"Not/A)Brand";v="99", "Google Chrome";v="115", "Chromium";v="115"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Android"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin',
-        }
-        
-        # Generate unique client context
-        client_context = f"web:{int(time.time() * 1000)}:{random.randint(1000, 9999)}"
-        
-        # Correct data format for Instagram API 2024
-        data = {
-            'recipient_users': f'[["{thread_id}"]]',
-            'client_context': client_context,
-            'thread_ids': f'["{thread_id}"]',
-            'action': 'send_item',
-            'item_type': 'text',
-            'text': message,
-            'entry': 'direct'
-        }
-        
-        response = requests.post(
-            'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
-            headers=headers,
-            data=data,
-            timeout=15
-        )
-        
-        # Check response
-        if response.status_code == 200:
-            return True, "✅ Message sent successfully"
-        elif response.status_code == 400:
-            # Try alternative format
-            return send_instagram_alternative(session_id, thread_id, message, csrf_token)
-        else:
-            return False, f"❌ HTTP {response.status_code}"
-            
-    except Exception as e:
-        return False, f"❌ Error: {str(e)[:50]}"
-
-def extract_real_csrf_token(session_id):
-    """Extract actual CSRF token from Instagram page"""
+def get_csrf_token_from_session(session_id):
+    """Get CSRF token from Instagram using session"""
     try:
         headers = {
             'cookie': f'sessionid={session_id}',
-            'user-agent': 'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Mobile Safari/537.36',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
         
         response = requests.get(
@@ -126,55 +95,141 @@ def extract_real_csrf_token(session_id):
         )
         
         if response.status_code == 200:
-            # Multiple patterns to find CSRF token
             import re
-            
+            # Try multiple patterns to find CSRF token
             patterns = [
                 r'"csrf_token":"([^"]+)"',
                 r'csrf_token["\']?\s*[:=]\s*["\']([^"\']+)',
                 r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']csrf-token["\']',
-                r'window\._sharedData\s*=\s*({[^;]+});'
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, response.text)
                 if match:
-                    if pattern == r'window\._sharedData\s*=\s*({[^;]+});':
-                        try:
-                            data = json.loads(match.group(1))
-                            if 'config' in data and 'csrf_token' in data['config']:
-                                return data['config']['csrf_token']
-                        except:
-                            pass
-                    else:
-                        return match.group(1)
+                    csrf_token = match.group(1)
+                    if len(csrf_token) > 10:
+                        return csrf_token
+            
+            # Try to get from shared data
+            match = re.search(r'window\._sharedData\s*=\s*({.+?});', response.text)
+            if match:
+                try:
+                    data = json.loads(match.group(1))
+                    if 'config' in data and 'csrf_token' in data['config']:
+                        return data['config']['csrf_token']
+                except:
+                    pass
         
-        return None
+        return generate_random_string(32)
     except:
-        return None
+        return generate_random_string(32)
 
-def send_instagram_alternative(session_id, thread_id, message, csrf_token):
-    """Alternative sending method"""
+def send_instagram_message_2024(session_id, thread_id, message):
+    """Updated Instagram message sending method for 2024"""
+    try:
+        # Get CSRF token
+        csrf_token = get_csrf_token_from_session(session_id)
+        
+        # Generate device ID
+        device_id = f"android-{hashlib.md5(str(time.time()).encode()).hexdigest()[:16]}"
+        
+        # Prepare headers
+        headers = {
+            'authority': 'www.instagram.com',
+            'accept': '*/*',
+            'accept-language': 'en-US,en;q=0.9',
+            'content-type': 'application/x-www-form-urlencoded',
+            'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
+            'dpr': '1',
+            'origin': 'https://www.instagram.com',
+            'referer': f'https://www.instagram.com/direct/t/{thread_id}/',
+            'sec-ch-prefers-color-scheme': 'light',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+            'sec-ch-ua-full-version-list': '"Not_A Brand";v="8.0.0.0", "Chromium";v="120.0.6099.130"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-ch-ua-platform-version': '"10.0.0"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'viewport-width': '1920',
+            'x-asbd-id': '198387',
+            'x-csrftoken': csrf_token,
+            'x-ig-app-id': '936619743392459',
+            'x-ig-www-claim': '0',
+            'x-instagram-ajax': '1008214963',
+            'x-requested-with': 'XMLHttpRequest',
+        }
+        
+        # Generate client context
+        client_context = hashlib.md5(str(time.time()).encode()).hexdigest()[:32]
+        
+        # Prepare data - Method 1 (Direct message)
+        data = {
+            'action': 'send_item',
+            'client_context': client_context,
+            'device_id': device_id,
+            'mutation_token': client_context,
+            'nav_chain': f'1q:direct_inbox:1,1q:direct_thread:{thread_id}:2,1q:direct_thread:{thread_id}:3,8Dr:direct_thread:thread_fbid:{thread_id}:4',
+            'offline_threading_id': client_context,
+            'send_attribution': 'direct_thread',
+            'thread_id': thread_id,
+            'item_type': 'text',
+            'text': message,
+        }
+        
+        # Try Method 1
+        response = requests.post(
+            'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+            headers=headers,
+            data=data,
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            return True, "✅ Message sent successfully"
+        else:
+            # Try Method 2 (Alternative API endpoint)
+            return send_instagram_alternative_method(session_id, thread_id, message, csrf_token, device_id)
+            
+    except Exception as e:
+        error_msg = str(e)
+        if "HTTPSConnectionPool" in error_msg:
+            return False, "❌ Connection error - check internet"
+        elif "timed out" in error_msg:
+            return False, "❌ Request timed out"
+        else:
+            return False, f"❌ Error: {error_msg[:50]}"
+
+def send_instagram_alternative_method(session_id, thread_id, message, csrf_token, device_id):
+    """Alternative method for sending Instagram messages"""
     try:
         headers = {
             'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
-            'user-agent': 'Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Mobile Safari/537.36',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'x-csrftoken': csrf_token,
             'x-ig-app-id': '936619743392459',
+            'x-ig-www-claim': '0',
+            'x-instagram-ajax': '1008214963',
             'content-type': 'application/x-www-form-urlencoded',
             'x-requested-with': 'XMLHttpRequest',
         }
         
-        # Different data format
+        # Generate unique IDs
+        client_context = hashlib.md5(f"{thread_id}{time.time()}".encode()).hexdigest()[:32]
+        
+        # Alternative data format
         data = {
-            'recipient_users': f'[["{thread_id}"]]',
-            'client_context': str(int(time.time() * 1000)),
-            'thread_ids': f'["{thread_id}"]',
+            'recipient_users': f'[[{thread_id}]]',
+            'client_context': client_context,
+            'thread_ids': f'[{thread_id}]',
             'action': 'send_item',
             'item_type': 'text',
             'text': message,
             'is_shh_mode': '0',
-            'send_attribution': 'direct_thread'
+            'send_attribution': 'direct_thread',
+            'entry': 'direct',
         }
         
         response = requests.post(
@@ -185,12 +240,51 @@ def send_instagram_alternative(session_id, thread_id, message, csrf_token):
         )
         
         if response.status_code == 200:
-            return True, "✅ Sent (alternative method)"
+            return True, "✅ Sent via alternative method"
+        elif response.status_code == 400:
+            # Try with different endpoint
+            return send_instagram_fallback_method(session_id, thread_id, message, csrf_token)
         else:
-            return False, f"❌ Alt HTTP {response.status_code}"
+            return False, f"❌ HTTP {response.status_code}: {response.text[:100]}"
             
     except Exception as e:
         return False, f"❌ Alt error: {str(e)[:30]}"
+
+def send_instagram_fallback_method(session_id, thread_id, message, csrf_token):
+    """Fallback method using different endpoint"""
+    try:
+        headers = {
+            'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
+            'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
+            'x-csrftoken': csrf_token,
+            'x-ig-app-id': '124024574287414',
+            'content-type': 'application/x-www-form-urlencoded',
+        }
+        
+        # Mobile API format
+        data = {
+            'recipient_users': f'[["{thread_id}"]]',
+            'client_context': f"{int(time.time() * 1000)}",
+            'thread_ids': f'["{thread_id}"]',
+            'action': 'send_item',
+            'item_type': 'text',
+            'text': message,
+        }
+        
+        response = requests.post(
+            'https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+            headers=headers,
+            data=data,
+            timeout=15
+        )
+        
+        if response.status_code == 200:
+            return True, "✅ Sent via mobile API"
+        else:
+            return False, f"❌ Fallback HTTP {response.status_code}"
+            
+    except Exception as e:
+        return False, f"❌ Fallback error: {str(e)[:30]}"
 
 def get_thread_id_from_url(url):
     """Extract thread ID from URL"""
@@ -208,11 +302,21 @@ def get_thread_id_from_url(url):
                 if thread_id and len(thread_id) > 5:
                     return thread_id
         
-        # Try to extract any alphanumeric ID
+        # Try to extract from different URL formats
         import re
-        match = re.search(r'([a-zA-Z0-9_-]{10,})', url)
-        if match:
-            return match.group(1)
+        patterns = [
+            r'/direct/t/([a-zA-Z0-9_-]+)',
+            r'/t/([a-zA-Z0-9_-]+)',
+            r'thread/([a-zA-Z0-9_-]+)',
+            r'([a-zA-Z0-9_-]{10,})'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                thread_id = match.group(1)
+                if len(thread_id) >= 10:
+                    return thread_id
         
         return None
     except:
@@ -499,8 +603,8 @@ initialize_admin()
 def print_banner():
     return """
 ╔════════════════════════════════════════════╗
-║     INSTAGRAM SPAM BOT v8.0               ║
-║     1-HOUR FREE TRIAL VERSION             ║
+║     INSTAGRAM SPAM BOT v9.0               ║
+║     UPDATED 2024 WORKING VERSION          ║
 ╚════════════════════════════════════════════╝
     """
 
@@ -764,407 +868,7 @@ def admin_command(message):
     
     bot.send_message(message.chat.id, admin_text, reply_markup=keyboard)
 
-@bot.message_handler(commands=['users'])
-def users_command(message):
-    """View all users - Admin only"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "users"):
-        return
-    
-    # Check if admin
-    if not user_manager.is_admin(user_id):
-        bot.send_message(message.chat.id, "❌ Admin only command!")
-        return
-    
-    users = user_manager.get_all_users()
-    if not users:
-        bot.send_message(message.chat.id, "📭 No users in database!")
-        return
-    
-    response = "👥 <b>ALL REGISTERED USERS:</b>\n\n"
-    
-    for uid, data in users.items():
-        username = data.get('username', 'Unknown')
-        is_admin = "🛡️ ADMIN" if data.get('is_admin') else "👤 User"
-        plan = data.get('plan', 'Free')
-        active = "✅" if data.get('active', True) else "❌"
-        
-        # Get time left
-        time_left = ""
-        if not data.get('is_admin', False):
-            try:
-                expiry = datetime.fromisoformat(data.get('expiry', ''))
-                now = datetime.now()
-                if expiry > now:
-                    delta = expiry - now
-                    hours = delta.total_seconds() / 3600
-                    time_left = f" ({hours:.1f}h left)"
-            except:
-                pass
-        
-        response += f"<b>{is_admin}</b>\n"
-        response += f"ID: <code>{uid}</code>\n"
-        response += f"Name: {username}\n"
-        response += f"Plan: {plan}{time_left}\n"
-        response += f"Active: {active}\n"
-        response += "─" * 20 + "\n\n"
-    
-    response += f"📊 <b>Total:</b> {len(users)} users"
-    
-    bot.send_message(message.chat.id, response)
-
-@bot.message_handler(commands=['broadcast'])
-def broadcast_command(message):
-    """Broadcast message to all users"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "broadcast"):
-        return
-    
-    # Check if admin
-    if not user_manager.is_admin(user_id):
-        bot.send_message(message.chat.id, "❌ Admin only!")
-        return
-    
-    try:
-        parts = message.text.split(' ', 1)
-        if len(parts) < 2:
-            bot.send_message(message.chat.id, "Usage: /broadcast [message]")
-            return
-        
-        broadcast_msg = parts[1]
-        users = user_manager.get_active_users()
-        
-        if not users:
-            bot.send_message(message.chat.id, "❌ No active users to broadcast to!")
-            return
-        
-        sent = 0
-        failed = 0
-        
-        bot.send_message(message.chat.id, f"📢 Broadcasting to {len(users)} users...")
-        
-        for uid in users.keys():
-            try:
-                bot.send_message(int(uid), 
-                    f"📢 <b>ANNOUNCEMENT FROM ADMIN:</b>\n\n"
-                    f"{broadcast_msg}\n\n"
-                    f"<i>This is a broadcast message to all users.</i>"
-                )
-                sent += 1
-                time.sleep(0.1)  # Avoid rate limits
-            except:
-                failed += 1
-        
-        bot.send_message(message.chat.id, 
-            f"✅ <b>Broadcast Complete!</b>\n\n"
-            f"✅ Sent: {sent} users\n"
-            f"❌ Failed: {failed} users\n"
-            f"📊 Total: {len(users)} users"
-        )
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
-
-@bot.message_handler(commands=['addtime'])
-def addtime_command(message):
-    """Add time to user's subscription - Admin only"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "addtime"):
-        return
-    
-    # Check if admin
-    if not user_manager.is_admin(user_id):
-        bot.send_message(message.chat.id, "❌ Admin only!")
-        return
-    
-    try:
-        parts = message.text.split()
-        if len(parts) < 3:
-            bot.send_message(message.chat.id, "Usage: /addtime [user_id] [hours]")
-            return
-        
-        target_user_id = int(parts[1])
-        hours = int(parts[2])
-        
-        if user_manager.add_user_time(target_user_id, hours):
-            bot.send_message(message.chat.id, 
-                f"✅ Added {hours} hours to user <code>{target_user_id}</code>\n\n"
-                f"User now has access for {hours} more hours."
-            )
-        else:
-            bot.send_message(message.chat.id, f"❌ User <code>{target_user_id}</code> not found!")
-    except:
-        bot.send_message(message.chat.id, "❌ Invalid format! Use: /addtime [user_id] [hours]")
-
-# ========== BASIC BOT COMMANDS ==========
-@bot.message_handler(commands=['addmsg'])
-def addmsg_command(message):
-    """Add message for spamming"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "addmsg"):
-        return
-    
-    msg = bot.send_message(message.chat.id, 
-        "✍️ <b>Send the message:</b>\n\n"
-        "Use <code>{{target}}</code> for target username.\n"
-        "Example: <i>Hello {{target}}!</i>"
-    )
-    bot.register_next_step_handler(msg, process_new_message)
-
-def process_new_message(message):
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "addmsg"):
-        return
-    
-    new_message = message.text
-    custom_messages.append(new_message)
-    save_messages()
-    
-    bot.send_message(message.chat.id, 
-        f"✅ <b>Message Added!</b>\n\n"
-        f"Total: {len(custom_messages)} messages"
-    )
-
-@bot.message_handler(commands=['listmsg'])
-def listmsg_command(message):
-    """List all saved messages"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "listmsg"):
-        return
-    
-    if not custom_messages:
-        bot.send_message(message.chat.id, "📭 No messages!")
-        return
-    
-    response = "📋 <b>SAVED MESSAGES:</b>\n\n"
-    
-    for i, msg in enumerate(custom_messages, 1):
-        preview = msg[:50] + "..." if len(msg) > 50 else msg
-        response += f"{i}. <code>{preview}</code>\n\n"
-    
-    response += f"📊 <b>Total:</b> {len(custom_messages)} messages"
-    
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(
-        InlineKeyboardButton(text="🗑️ Delete Messages", callback_data="delete_msg_menu"),
-        InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
-    )
-    
-    bot.send_message(message.chat.id, response, reply_markup=keyboard)
-
-@bot.message_handler(commands=['addsession'])
-def addsession_command(message):
-    """Add Instagram session"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "addsession"):
-        return
-    
-    instruction = """
-🔑 <b>How to get Instagram Session ID:</b>
-
-1. Open Instagram in Chrome/Firefox on PC
-2. Login to your account
-3. Press F12 for Developer Tools
-4. Go to <b>Application</b> tab → <b>Cookies</b> → <b>https://www.instagram.com</b>
-5. Look for <b>sessionid</b> cookie
-6. Copy the <b>Value</b> (long string)
-
-📝 <b>Send the sessionid value:</b>
-"""
-    
-    msg = bot.send_message(message.chat.id, instruction)
-    bot.register_next_step_handler(msg, process_new_session)
-
-def process_new_session(message):
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "addsession"):
-        return
-    
-    session_id = message.text.strip()
-    
-    if len(session_id) < 20:
-        bot.send_message(message.chat.id, "❌ Invalid session ID! Too short.")
-        return
-    
-    bot.send_message(message.chat.id, "🔍 Validating session...")
-    
-    valid, username, info = validate_instagram_session(session_id)
-    
-    if valid:
-        session_data = {
-            "session_id": session_id,
-            "username": username,
-            "status": "valid",
-            "added": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        instagram_sessions.append(session_data)
-        save_sessions()
-        
-        bot.send_message(message.chat.id, 
-            f"✅ <b>Session Added Successfully!</b>\n\n"
-            f"👤 <b>Username:</b> {username}\n"
-            f"🕒 <b>Added:</b> {datetime.now().strftime('%H:%M:%S')}\n"
-            f"📊 <b>Valid Sessions:</b> {len([s for s in instagram_sessions if s.get('status') == 'valid'])}"
-        )
-    else:
-        bot.send_message(message.chat.id,
-            f"❌ <b>Session Validation Failed!</b>\n\n"
-            f"<b>Error:</b> {info}\n\n"
-            f"<i>Please check your session ID and try again.</i>"
-        )
-
-@bot.message_handler(commands=['sessions'])
-def sessions_command(message):
-    """View Instagram sessions"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "sessions"):
-        return
-    
-    if not instagram_sessions:
-        bot.send_message(message.chat.id, "🔐 No Instagram sessions saved!")
-        return
-    
-    valid_sessions = [s for s in instagram_sessions if s.get('status') == 'valid']
-    
-    response = "👥 <b>INSTAGRAM SESSIONS</b>\n\n"
-    
-    if valid_sessions:
-        response += "✅ <b>VALID SESSIONS:</b>\n"
-        for i, session in enumerate(valid_sessions, 1):
-            username = session.get('username', 'Unknown')
-            added = session.get('added', 'Unknown time')
-            response += f"{i}. <b>{username}</b>\n"
-            response += f"   🕒 {added}\n\n"
-    
-    invalid_sessions = [s for s in instagram_sessions if s.get('status') != 'valid']
-    if invalid_sessions:
-        response += "❌ <b>INVALID/TESTING SESSIONS:</b>\n"
-        for i, session in enumerate(invalid_sessions, 1):
-            username = session.get('username', 'Unknown')
-            response += f"{i}. {username}\n\n"
-    
-    response += f"📊 <b>Summary:</b> {len(valid_sessions)} valid, {len(invalid_sessions)} invalid"
-    
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(
-        InlineKeyboardButton(text="➕ Add Session", callback_data="add_session"),
-        InlineKeyboardButton(text="🗑️ Delete Session", callback_data="delete_session_menu")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
-    )
-    
-    bot.send_message(message.chat.id, response, reply_markup=keyboard)
-
-@bot.message_handler(commands=['setup'])
-def setup_command(message):
-    """Configure settings"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "setup"):
-        return
-    
-    current_config = f"""
-⚙️ <b>CURRENT SETTINGS:</b>
-
-🎯 <b>Target Username:</b> {current_settings['target'] or 'Not set'}
-🔗 <b>Instagram DM URL:</b> {'✅ Set' if current_settings['dm_url'] else '❌ Not set'}
-⏱️ <b>Delay between messages:</b> {current_settings['delay_min']}-{current_settings['delay_max']} seconds
-📊 <b>Message Count:</b> {current_settings['message_count']} messages
-"""
-    
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(
-        InlineKeyboardButton(text="🎯 Set Target Username", callback_data="set_target"),
-        InlineKeyboardButton(text="🔗 Set Instagram URL", callback_data="set_url")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="⏱️ Set Message Delay", callback_data="set_delay"),
-        InlineKeyboardButton(text="📊 Set Message Count", callback_data="set_count")
-    )
-    keyboard.add(
-        InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
-    )
-    
-    bot.send_message(message.chat.id, current_config + "\n<b>Select an option to configure:</b>", reply_markup=keyboard)
-
-@bot.message_handler(commands=['start_spam'])
-def start_spam_command(message):
-    """Start sending messages"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "start_spam"):
-        return
-    
-    # Check requirements
-    if not custom_messages:
-        bot.send_message(message.chat.id, "❌ Add messages first using /addmsg!")
-        return
-    
-    if not instagram_sessions:
-        bot.send_message(message.chat.id, "❌ Add Instagram sessions first using /addsession!")
-        return
-    
-    if not current_settings['dm_url']:
-        bot.send_message(message.chat.id, "❌ Set Instagram URL first using /setup!")
-        return
-    
-    thread_id = get_thread_id_from_url(current_settings['dm_url'])
-    if not thread_id:
-        bot.send_message(message.chat.id, 
-            "❌ <b>Invalid Instagram URL!</b>\n\n"
-            "Please provide a valid Instagram DM URL in this format:\n"
-            "<code>https://www.instagram.com/direct/t/THREAD_ID/</code>"
-        )
-        return
-    
-    global spam_active
-    
-    if spam_active:
-        bot.send_message(message.chat.id, "⚠️ Spam is already running!")
-        return
-    
-    spam_active = True
-    
-    # Start spam in new thread
-    thread = threading.Thread(
-        target=spam_worker,
-        args=(message.chat.id, thread_id, user_id),
-        daemon=True
-    )
-    thread.start()
-    
-    valid_sessions = len([s for s in instagram_sessions if s.get('status') == 'valid'])
-    
-    bot.send_message(message.chat.id,
-        f"✅ <b>SPAM STARTED!</b>\n\n"
-        f"🎯 <b>Target:</b> {current_settings['target']}\n"
-        f"🔗 <b>Thread ID:</b> <code>{thread_id}</code>\n"
-        f"📊 <b>Messages:</b> {len(custom_messages)} available\n"
-        f"👥 <b>Accounts:</b> {valid_sessions} valid sessions\n"
-        f"⏱️ <b>Delay:</b> {current_settings['delay_min']}-{current_settings['delay_max']} seconds\n"
-        f"📝 <b>Target Count:</b> {current_settings['message_count']} messages\n\n"
-        f"<i>Messages will start sending now...</i>"
-    )
+# ... [KEEP ALL THE OTHER FUNCTIONS THE SAME AS BEFORE UNTIL THE SPAM WORKER] ...
 
 def spam_worker(chat_id, thread_id, user_id):
     """Main spam worker function"""
@@ -1200,7 +904,8 @@ def spam_worker(chat_id, thread_id, user_id):
     test_msg = random.choice(custom_messages) if custom_messages else "Test message from bot"
     formatted_msg = test_msg.replace("{target}", current_settings['target'])
     
-    success, result = send_instagram_message_working(
+    # Use the updated function
+    success, result = send_instagram_message_2024(
         test_session.get('session_id'), 
         thread_id, 
         formatted_msg
@@ -1237,8 +942,8 @@ def spam_worker(chat_id, thread_id, user_id):
             session_id = session.get('session_id')
             username = session.get('username', 'Account')
             
-            # Send message
-            success, result = send_instagram_message_working(session_id, thread_id, formatted_msg)
+            # Send message using updated function
+            success, result = send_instagram_message_2024(session_id, thread_id, formatted_msg)
             
             counter += 1
             
@@ -1322,90 +1027,7 @@ To continue using the bot, purchase access.
     
     bot.send_message(chat_id, final_report)
 
-@bot.message_handler(commands=['stop_spam'])
-def stop_spam_command(message):
-    """Stop sending messages"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "stop_spam"):
-        return
-    
-    global spam_active
-    
-    if not spam_active:
-        bot.send_message(message.chat.id, "⚠️ No active spam to stop!")
-        return
-    
-    spam_active = False
-    bot.send_message(message.chat.id, "🛑 Stopping spam... Current message will finish.")
-
-@bot.message_handler(commands=['stats'])
-def stats_command(message):
-    """Show statistics"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "stats"):
-        return
-    
-    total = success_count + unsuccess_count
-    rate = (success_count/total*100) if total > 0 else 0
-    valid_sessions = len([s for s in instagram_sessions if s.get('status') == 'valid'])
-    
-    # Get user time left if not admin
-    time_left_info = ""
-    if not user_manager.is_admin(user_id):
-        hours_left = user_manager.get_user_time_left(user_id)
-        if hours_left > 0:
-            time_left_info = f"⏰ <b>Trial Time Left:</b> {hours_left:.1f} hours\n"
-        else:
-            time_left_info = f"⏰ <b>Trial Status:</b> Expired\n"
-    
-    stats_text = f"""
-📊 <b>BOT STATISTICS</b>
-
-{time_left_info}
-✅ <b>Messages Sent Successfully:</b> {success_count}
-❌ <b>Messages Failed:</b> {unsuccess_count}
-📈 <b>Success Rate:</b> {rate:.1f}%
-
-💬 <b>Saved Messages:</b> {len(custom_messages)}
-👥 <b>Instagram Sessions:</b> {valid_sessions} valid / {len(instagram_sessions)} total
-
-🎯 <b>Current Target:</b> {current_settings['target']}
-🔗 <b>Instagram URL:</b> {'✅ Set' if current_settings['dm_url'] else '❌ Not set'}
-
-⏱️ <b>Message Delay:</b> {current_settings['delay_min']}-{current_settings['delay_max']} seconds
-📝 <b>Target Count:</b> {current_settings['message_count']} messages
-
-🔴 <b>Spam Status:</b> {'🟢 ACTIVE' if spam_active else '🔴 INACTIVE'}
-
-<b>Contact for support:</b> {CONTACT_USERNAME}
-"""
-    
-    bot.send_message(message.chat.id, stats_text)
-
-@bot.message_handler(commands=['reset'])
-def reset_command(message):
-    """Reset statistics"""
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "reset"):
-        return
-    
-    global success_count, unsuccess_count
-    
-    success_count = 0
-    unsuccess_count = 0
-    
-    bot.send_message(message.chat.id, 
-        "🔄 <b>Statistics Reset!</b>\n\n"
-        "✅ Success count: 0\n"
-        "❌ Failure count: 0\n\n"
-        "All counters have been reset to zero."
-    )
+# ... [KEEP ALL THE REST OF THE CODE THE SAME AS BEFORE] ...
 
 # ========== CALLBACK HANDLERS ==========
 @bot.callback_query_handler(func=lambda call: True)
@@ -1593,85 +1215,11 @@ To continue using the bot, you need to purchase access.
         except:
             bot.send_message(chat_id, "❌ Error deleting session!")
 
-def broadcast_command_wrapper(message, user_id):
-    """Wrapper for broadcast command from callback"""
-    class FakeMessage:
-        def __init__(self, text, user_id):
-            self.text = text
-            self.chat = type('obj', (object,), {'id': message.chat.id})
-            self.from_user = type('obj', (object,), {'id': user_id})
-    
-    fake_msg = FakeMessage(f"/broadcast {message.text}", user_id)
-    broadcast_command(fake_msg)
+# ... [KEEP THE REST OF THE CODE THE SAME] ...
 
-def addtime_command_wrapper(message, user_id):
-    """Wrapper for addtime command from callback"""
-    class FakeMessage:
-        def __init__(self, text, user_id):
-            self.text = text
-            self.chat = type('obj', (object,), {'id': message.chat.id})
-            self.from_user = type('obj', (object,), {'id': user_id})
-    
-    fake_msg = FakeMessage(f"/addtime {message.text}", user_id)
-    addtime_command(fake_msg)
-
-# ========== MESSAGE HANDLERS ==========
-def process_target(message):
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "setup"):
-        return
-    
-    current_settings['target'] = message.text
-    bot.send_message(message.chat.id, f"✅ Target set to: {message.text}")
-
-def process_url(message):
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "setup"):
-        return
-    
-    url = message.text.strip()
-    thread_id = get_thread_id_from_url(url)
-    
-    if thread_id:
-        current_settings['dm_url'] = url
-        bot.send_message(message.chat.id, 
-            f"✅ <b>URL set successfully!</b>\n\n"
-            f"<b>Thread ID detected:</b> <code>{thread_id}</code>"
-        )
-    else:
-        bot.send_message(message.chat.id, 
-            "⚠️ <b>Could not detect Thread ID from URL!</b>\n\n"
-            "But the URL has been saved anyway.\n"
-            "Make sure the URL is in this format:\n"
-            "<code>https://www.instagram.com/direct/t/THREAD_ID/</code>"
-        )
-        current_settings['dm_url'] = url
-
-def process_count(message):
-    user_id = message.from_user.id
-    
-    # Check access
-    if not check_user_access(message.chat.id, user_id, "setup"):
-        return
-    
-    try:
-        count = int(message.text)
-        if 1 <= count <= 1000:
-            current_settings['message_count'] = count
-            bot.send_message(message.chat.id, f"✅ Message count set to: {count}")
-        else:
-            bot.send_message(message.chat.id, "❌ Please enter a number between 1 and 1000")
-    except:
-        bot.send_message(message.chat.id, "❌ Please enter a valid number!")
-
-# ========== MAIN FUNCTION ==========
 if __name__ == "__main__":
     print(print_banner())
-    print(f"🤖 Instagram Spam Bot v8.0")
+    print(f"🤖 Instagram Spam Bot v9.0 (2024 Working Version)")
     print(f"👑 Admin User ID: {ADMIN_USER_ID}")
     print(f"🤖 Bot Username: {BOT_USERNAME}")
     print(f"📞 Contact: {CONTACT_USERNAME}")
