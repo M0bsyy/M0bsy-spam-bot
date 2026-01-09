@@ -3,27 +3,20 @@ import sys
 import json
 import random
 import time
-import asyncio
-import logging
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandStart
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram.enums import ParseMode
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+import telebot
+from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import logging
 
 # ========== CONFIGURATION ==========
 TELEGRAM_BOT_TOKEN = "8595686704:AAGZ6-f7cjiaET1J2yXM-QBuJCq_fyOMJ7o"
 ADMIN_USER_ID = "6107382622"
 
-# Initialize bot and dispatcher
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
+# Initialize bot
+bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="HTML")
 
 # ========== USER MANAGEMENT ==========
 class UserManager:
@@ -103,6 +96,9 @@ current_settings = {
     "active_sessions": []
 }
 
+# State tracking for conversations
+user_states = {}
+
 # ========== DATA MANAGEMENT ==========
 DATA_DIR = Path("instagram_bot_data")
 DATA_DIR.mkdir(exist_ok=True)
@@ -147,19 +143,6 @@ def load_sessions():
 load_messages()
 load_sessions()
 
-# ========== STATES ==========
-class Form(StatesGroup):
-    waiting_for_target = State()
-    waiting_for_message = State()
-    waiting_for_session = State()
-    waiting_for_url = State()
-    waiting_for_delay_min = State()
-    waiting_for_delay_max = State()
-    waiting_for_count = State()
-
-# ========== INITIALIZE ==========
-user_manager = UserManager()
-
 # ========== HELPER FUNCTIONS ==========
 def print_banner():
     banner = """
@@ -170,15 +153,15 @@ def print_banner():
     """
     return banner
 
-async def send_start_message(message: Message):
+def send_start_message(chat_id):
     """Send welcome message with instructions"""
-    user_id = str(message.from_user.id)
+    user_id = str(chat_id)
     is_admin = user_manager.is_admin(user_id)
     
     welcome_text = f"""
 {print_banner()}
 
-📋 *Available Commands:*
+📋 <b>Available Commands:</b>
 
 🔹 /start - Show this help message
 🔹 /addmsg - Add a new message for spamming
@@ -193,7 +176,7 @@ async def send_start_message(message: Message):
 
 {"🔹 /admin - Admin Panel (Admin Only)" if is_admin else ""}
 
-📊 *Current Status:*
+📊 <b>Current Status:</b>
 • Messages saved: {len(custom_messages)}
 • Sessions: {len(instagram_sessions)}
 • Target: {current_settings['target'] or 'Not set'}
@@ -214,13 +197,15 @@ async def send_start_message(message: Message):
     if is_admin:
         keyboard_buttons.append([InlineKeyboardButton(text="🔐 Admin Panel", callback_data="admin_panel")])
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    keyboard = InlineKeyboardMarkup()
+    for row in keyboard_buttons:
+        keyboard.add(*row)
     
-    await message.answer(welcome_text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+    bot.send_message(chat_id, welcome_text, reply_markup=keyboard)
 
 # ========== MAIN COMMANDS ==========
-@dp.message(CommandStart())
-async def start_command(message: Message):
+@bot.message_handler(commands=['start'])
+def start_command(message):
     """Handle /start command"""
     user_id = str(message.from_user.id)
     username = message.from_user.username or message.from_user.first_name
@@ -233,60 +218,63 @@ async def start_command(message: Message):
         user_manager.users[user_id]["is_admin"] = True
         user_manager.save_users()
     
-    await send_start_message(message)
+    send_start_message(message.chat.id)
 
-@dp.message(Command("addmsg"))
-async def addmsg_command(message: Message, state: FSMContext):
+@bot.message_handler(commands=['addmsg'])
+def addmsg_command(message):
     """Add a new message for spamming"""
-    await message.answer("✍️ Please send the message you want to add for spamming.\n\nYou can use {target} as a placeholder for the target name:")
-    await state.set_state(Form.waiting_for_message)
+    msg = bot.send_message(message.chat.id, "✍️ Please send the message you want to add for spamming.\n\nYou can use {target} as a placeholder for the target name:")
+    bot.register_next_step_handler(msg, process_new_message)
 
-@dp.message(Form.waiting_for_message)
-async def process_new_message(message: Message, state: FSMContext):
+def process_new_message(message):
     new_message = message.text
     custom_messages.append(new_message)
     save_messages()
     
-    await message.answer(f"✅ Message added successfully!\n\nTotal messages: {len(custom_messages)}\n\n📝 Preview:\n{new_message[:200]}")
-    await state.clear()
+    bot.send_message(message.chat.id, f"✅ Message added successfully!\n\nTotal messages: {len(custom_messages)}\n\n📝 Preview:\n{new_message[:200]}")
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add Another", callback_data="add_msg"),
-         InlineKeyboardButton(text="📋 View All", callback_data="list_msg")],
-        [InlineKeyboardButton(text="⚙️ Setup Spam", callback_data="setup")]
-    ])
-    await message.answer("What would you like to do next?", reply_markup=keyboard)
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(text="➕ Add Another", callback_data="add_msg"),
+        InlineKeyboardButton(text="📋 View All", callback_data="list_msg")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="⚙️ Setup Spam", callback_data="setup")
+    )
+    bot.send_message(message.chat.id, "What would you like to do next?", reply_markup=keyboard)
 
-@dp.message(Command("listmsg"))
-async def listmsg_command(message: Message):
+@bot.message_handler(commands=['listmsg'])
+def listmsg_command(message):
     """List all saved messages"""
     if not custom_messages:
-        await message.answer("📭 No messages saved yet. Use /addmsg to add messages.")
+        bot.send_message(message.chat.id, "📭 No messages saved yet. Use /addmsg to add messages.")
         return
     
-    response = "📋 *Saved Messages:*\n\n"
+    response = "📋 <b>Saved Messages:</b>\n\n"
     for i, msg in enumerate(custom_messages, 1):
         preview = msg[:50] + "..." if len(msg) > 50 else msg
-        response += f"{i}. `{preview}`\n"
+        response += f"{i}. <code>{preview}</code>\n"
     
     response += f"\nTotal: {len(custom_messages)} messages"
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Delete", callback_data="delete_msg_menu"),
-         InlineKeyboardButton(text="✏️ Edit", callback_data="edit_msg_menu")],
-        [InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")]
-    ])
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(text="❌ Delete", callback_data="delete_msg_menu"),
+        InlineKeyboardButton(text="✏️ Edit", callback_data="edit_msg_menu")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
+    )
     
-    await message.answer(response, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+    bot.send_message(message.chat.id, response, reply_markup=keyboard)
 
-@dp.message(Command("addsession"))
-async def addsession_command(message: Message, state: FSMContext):
+@bot.message_handler(commands=['addsession'])
+def addsession_command(message):
     """Add new Instagram session"""
-    await message.answer("🔑 Please send your Instagram session ID:\n\nTo get session ID:\n1. Login to Instagram in browser\n2. Open developer tools (F12)\n3. Go to Application → Cookies\n4. Copy 'sessionid' value")
-    await state.set_state(Form.waiting_for_session)
+    msg = bot.send_message(message.chat.id, "🔑 Please send your Instagram session ID:\n\nTo get session ID:\n1. Login to Instagram in browser\n2. Open developer tools (F12)\n3. Go to Application → Cookies\n4. Copy 'sessionid' value")
+    bot.register_next_step_handler(msg, process_new_session)
 
-@dp.message(Form.waiting_for_session)
-async def process_new_session(message: Message, state: FSMContext):
+def process_new_session(message):
     session_id = message.text.strip()
     
     # Save session
@@ -299,72 +287,78 @@ async def process_new_session(message: Message, state: FSMContext):
     instagram_sessions.append(session_data)
     save_sessions()
     
-    await message.answer(f"✅ Session added successfully!\n\nTotal sessions: {len(instagram_sessions)}")
-    await state.clear()
+    bot.send_message(message.chat.id, f"✅ Session added successfully!\n\nTotal sessions: {len(instagram_sessions)}")
 
-@dp.message(Command("sessions"))
-async def sessions_command(message: Message):
+@bot.message_handler(commands=['sessions'])
+def sessions_command(message):
     """View/Manage Instagram sessions"""
     if not instagram_sessions:
-        await message.answer("🔐 No Instagram sessions saved. Use /addsession to add one.")
+        bot.send_message(message.chat.id, "🔐 No Instagram sessions saved. Use /addsession to add one.")
         return
     
-    response = "👥 *Instagram Sessions:*\n\n"
+    response = "👥 <b>Instagram Sessions:</b>\n\n"
     for i, session in enumerate(instagram_sessions, 1):
         username = session.get('username', 'Unknown')
         added = session.get('added_on', '').split('T')[0] if session.get('added_on') else 'Unknown'
         
-        response += f"{i}. `{username}`\n"
+        response += f"{i}. <code>{username}</code>\n"
         response += f"   📅 Added: {added}\n"
         response += f"   🔑 Status: {session.get('status', 'added')}\n\n"
     
     response += f"\nTotal: {len(instagram_sessions)} sessions"
     
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add Session", callback_data="add_session"),
-         InlineKeyboardButton(text="❌ Delete Session", callback_data="delete_session_menu")],
-        [InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")]
-    ])
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(text="➕ Add Session", callback_data="add_session"),
+        InlineKeyboardButton(text="❌ Delete Session", callback_data="delete_session_menu")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
+    )
     
-    await message.answer(response, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+    bot.send_message(message.chat.id, response, reply_markup=keyboard)
 
-@dp.message(Command("setup"))
-async def setup_command(message: Message):
+@bot.message_handler(commands=['setup'])
+def setup_command(message):
     """Configure spam settings"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎯 Set Target Name", callback_data="set_target"),
-         InlineKeyboardButton(text="🔗 Set Group URL", callback_data="set_url")],
-        [InlineKeyboardButton(text="⏱️ Set Delay", callback_data="set_delay"),
-         InlineKeyboardButton(text="📊 Set Message Count", callback_data="set_count")],
-        [InlineKeyboardButton(text="◀️ Back", callback_data="main_menu")]
-    ])
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(text="🎯 Set Target Name", callback_data="set_target"),
+        InlineKeyboardButton(text="🔗 Set Group URL", callback_data="set_url")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="⏱️ Set Delay", callback_data="set_delay"),
+        InlineKeyboardButton(text="📊 Set Message Count", callback_data="set_count")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="◀️ Back", callback_data="main_menu")
+    )
     
-    await message.answer("⚙️ *Setup Menu:*\n\nConfigure your spam settings:", 
-                        parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+    bot.send_message(message.chat.id, "⚙️ <b>Setup Menu:</b>\n\nConfigure your spam settings:", reply_markup=keyboard)
 
-@dp.message(Command("start_spam"))
-async def start_spam_command(message: Message):
+@bot.message_handler(commands=['start_spam'])
+def start_spam_command(message):
     """Begin sending messages"""
     if not current_settings['target']:
-        await message.answer("❌ Please set target first using /setup")
+        bot.send_message(message.chat.id, "❌ Please set target first using /setup")
         return
     
     if not current_settings['dm_url']:
-        await message.answer("❌ Please set Group URL first using /setup")
+        bot.send_message(message.chat.id, "❌ Please set Group URL first using /setup")
         return
     
     if not custom_messages:
-        await message.answer("❌ No messages to send! Use /addmsg to add messages.")
+        bot.send_message(message.chat.id, "❌ No messages to send! Use /addmsg to add messages.")
         return
     
     if not instagram_sessions:
-        await message.answer("❌ No Instagram sessions added! Use /addsession to add at least one account.")
+        bot.send_message(message.chat.id, "❌ No Instagram sessions added! Use /addsession to add at least one account.")
         return
     
     global spam_active, spam_threads
     
     if spam_active:
-        await message.answer("⚠️ Spam is already running!")
+        bot.send_message(message.chat.id, "⚠️ Spam is already running!")
         return
     
     # Start spam
@@ -379,10 +373,10 @@ async def start_spam_command(message: Message):
     thread.start()
     spam_threads.append(thread)
     
-    await message.answer(f"""
-✅ *Spam Started!*
+    bot.send_message(message.chat.id, f"""
+✅ <b>Spam Started!</b>
 
-🎯 Target: `{current_settings['target']}`
+🎯 Target: <code>{current_settings['target']}</code>
 📊 Messages: {len(custom_messages)} available
 ⏱️ Delay: {current_settings['delay_min']}-{current_settings['delay_max']} seconds
 👥 Accounts: {len(instagram_sessions)}
@@ -390,25 +384,25 @@ async def start_spam_command(message: Message):
 📈 Now sending messages...
 
 To stop, use /stop_spam
-""", parse_mode=ParseMode.MARKDOWN)
+""")
 
-@dp.message(Command("stop_spam"))
-async def stop_spam_command(message: Message):
+@bot.message_handler(commands=['stop_spam'])
+def stop_spam_command(message):
     """Stop sending messages"""
     global spam_active
     
     if not spam_active:
-        await message.answer("⚠️ No active spam to stop!")
+        bot.send_message(message.chat.id, "⚠️ No active spam to stop!")
         return
     
     spam_active = False
-    await message.answer("🛑 Spam stopped!")
+    bot.send_message(message.chat.id, "🛑 Spam stopped!")
 
-@dp.message(Command("stats"))
-async def stats_command(message: Message):
+@bot.message_handler(commands=['stats'])
+def stats_command(message):
     """Show current statistics"""
     stats_text = f"""
-📊 *Current Statistics:*
+📊 <b>Current Statistics:</b>
 
 ✅ Successfully sent: {success_count}
 ❌ Failed: {unsuccess_count}
@@ -420,110 +414,111 @@ async def stats_command(message: Message):
 
 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
-    await message.answer(stats_text, parse_mode=ParseMode.MARKDOWN)
+    bot.send_message(message.chat.id, stats_text)
 
-@dp.message(Command("reset"))
-async def reset_command(message: Message):
+@bot.message_handler(commands=['reset'])
+def reset_command(message):
     """Reset all counters"""
     global success_count, unsuccess_count
     
     success_count = 0
     unsuccess_count = 0
-    await message.answer("🔄 Statistics reset to zero!")
+    bot.send_message(message.chat.id, "🔄 Statistics reset to zero!")
 
 # ========== CALLBACK HANDLERS ==========
-@dp.callback_query(F.data == "main_menu")
-async def main_menu_callback(callback_query: CallbackQuery):
-    await callback_query.message.delete()
-    await send_start_message(callback_query.message)
+@bot.callback_query_handler(func=lambda call: call.data == "main_menu")
+def main_menu_callback(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    send_start_message(call.message.chat.id)
 
-@dp.callback_query(F.data == "add_msg")
-async def add_msg_callback(callback_query: CallbackQuery, state: FSMContext):
-    await callback_query.message.answer("✍️ Please send the message you want to add for spamming.\n\nYou can use {target} as a placeholder for the target name:")
-    await state.set_state(Form.waiting_for_message)
-    await callback_query.answer()
+@bot.callback_query_handler(func=lambda call: call.data == "add_msg")
+def add_msg_callback(call):
+    msg = bot.send_message(call.message.chat.id, "✍️ Please send the message you want to add for spamming.\n\nYou can use {target} as a placeholder for the target name:")
+    bot.register_next_step_handler(msg, process_new_message)
+    bot.answer_callback_query(call.id)
 
-@dp.callback_query(F.data == "list_msg")
-async def list_msg_callback(callback_query: CallbackQuery):
-    await callback_query.message.delete()
-    await listmsg_command(callback_query.message)
+@bot.callback_query_handler(func=lambda call: call.data == "list_msg")
+def list_msg_callback(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    listmsg_command(call.message)
 
-@dp.callback_query(F.data == "add_session")
-async def add_session_callback(callback_query: CallbackQuery, state: FSMContext):
-    await callback_query.message.answer("🔑 Please send your Instagram session ID:")
-    await state.set_state(Form.waiting_for_session)
-    await callback_query.answer()
+@bot.callback_query_handler(func=lambda call: call.data == "add_session")
+def add_session_callback(call):
+    msg = bot.send_message(call.message.chat.id, "🔑 Please send your Instagram session ID:")
+    bot.register_next_step_handler(msg, process_new_session)
+    bot.answer_callback_query(call.id)
 
-@dp.callback_query(F.data == "list_sessions")
-async def list_sessions_callback(callback_query: CallbackQuery):
-    await callback_query.message.delete()
-    await sessions_command(callback_query.message)
+@bot.callback_query_handler(func=lambda call: call.data == "list_sessions")
+def list_sessions_callback(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    sessions_command(call.message)
 
-@dp.callback_query(F.data == "setup")
-async def setup_callback(callback_query: CallbackQuery):
-    await callback_query.message.delete()
-    await setup_command(callback_query.message)
+@bot.callback_query_handler(func=lambda call: call.data == "setup")
+def setup_callback(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    setup_command(call.message)
 
-@dp.callback_query(F.data == "set_target")
-async def set_target_callback(callback_query: CallbackQuery, state: FSMContext):
-    await callback_query.message.answer("🎯 Please send the target username (will replace {target} in messages):")
-    await state.set_state(Form.waiting_for_target)
-    await callback_query.answer()
+@bot.callback_query_handler(func=lambda call: call.data == "set_target")
+def set_target_callback(call):
+    msg = bot.send_message(call.message.chat.id, "🎯 Please send the target username (will replace {target} in messages):")
+    bot.register_next_step_handler(msg, process_target)
+    bot.answer_callback_query(call.id)
 
-@dp.message(Form.waiting_for_target)
-async def process_target(message: Message, state: FSMContext):
+def process_target(message):
     current_settings['target'] = message.text
-    await message.answer(f"✅ Target set to: `{message.text}`", parse_mode=ParseMode.MARKDOWN)
-    await state.clear()
+    bot.send_message(message.chat.id, f"✅ Target set to: <code>{message.text}</code>")
 
-@dp.callback_query(F.data == "set_url")
-async def set_url_callback(callback_query: CallbackQuery, state: FSMContext):
-    await callback_query.message.answer("🔗 Please send the Instagram Group/DM URL:")
-    await state.set_state(Form.waiting_for_url)
-    await callback_query.answer()
+@bot.callback_query_handler(func=lambda call: call.data == "set_url")
+def set_url_callback(call):
+    msg = bot.send_message(call.message.chat.id, "🔗 Please send the Instagram Group/DM URL:")
+    bot.register_next_step_handler(msg, process_url)
+    bot.answer_callback_query(call.id)
 
-@dp.message(Form.waiting_for_url)
-async def process_url(message: Message, state: FSMContext):
+def process_url(message):
     current_settings['dm_url'] = message.text
-    await message.answer("✅ Group URL set!")
-    await state.clear()
+    bot.send_message(message.chat.id, "✅ Group URL set!")
 
-@dp.callback_query(F.data == "set_delay")
-async def set_delay_callback(callback_query: CallbackQuery):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="2-5 seconds", callback_data="delay_2_5"),
-         InlineKeyboardButton(text="5-10 seconds", callback_data="delay_5_10")],
-        [InlineKeyboardButton(text="10-20 seconds", callback_data="delay_10_20"),
-         InlineKeyboardButton(text="30-60 seconds", callback_data="delay_30_60")],
-        [InlineKeyboardButton(text="◀️ Back", callback_data="setup")]
-    ])
-    await callback_query.message.answer("⏱️ Select delay between messages:", reply_markup=keyboard)
-    await callback_query.answer()
+@bot.callback_query_handler(func=lambda call: call.data == "set_delay")
+def set_delay_callback(call):
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(text="2-5 seconds", callback_data="delay_2_5"),
+        InlineKeyboardButton(text="5-10 seconds", callback_data="delay_5_10")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="10-20 seconds", callback_data="delay_10_20"),
+        InlineKeyboardButton(text="30-60 seconds", callback_data="delay_30_60")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="◀️ Back", callback_data="setup")
+    )
+    bot.send_message(call.message.chat.id, "⏱️ Select delay between messages:", reply_markup=keyboard)
+    bot.answer_callback_query(call.id)
 
-@dp.callback_query(F.data.startswith("delay_"))
-async def process_delay_callback(callback_query: CallbackQuery):
-    data = callback_query.data
+@bot.callback_query_handler(func=lambda call: call.data.startswith("delay_"))
+def process_delay_callback(call):
+    data = call.data
     delays = data.split("_")[1:]
     current_settings['delay_min'] = int(delays[0])
     current_settings['delay_max'] = int(delays[1])
     
-    await callback_query.message.answer(f"✅ Delay set to {delays[0]}-{delays[1]} seconds")
-    await callback_query.answer()
+    bot.send_message(call.message.chat.id, f"✅ Delay set to {delays[0]}-{delays[1]} seconds")
+    bot.answer_callback_query(call.id)
 
-@dp.callback_query(F.data == "start_spam")
-async def start_spam_callback(callback_query: CallbackQuery):
-    await callback_query.message.delete()
-    await start_spam_command(callback_query.message)
+@bot.callback_query_handler(func=lambda call: call.data == "start_spam")
+def start_spam_callback(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    start_spam_command(call.message)
 
-@dp.callback_query(F.data == "stop_spam")
-async def stop_spam_callback(callback_query: CallbackQuery):
-    await callback_query.message.delete()
-    await stop_spam_command(callback_query.message)
+@bot.callback_query_handler(func=lambda call: call.data == "stop_spam")
+def stop_spam_callback(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    stop_spam_command(call.message)
 
-@dp.callback_query(F.data == "stats")
-async def stats_callback(callback_query: CallbackQuery):
-    await callback_query.message.delete()
-    await stats_command(callback_query.message)
+@bot.callback_query_handler(func=lambda call: call.data == "stats")
+def stats_callback(call):
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    stats_command(call.message)
 
 # ========== SPAM WORKER ==========
 def spam_worker(chat_id, worker_id):
@@ -554,15 +549,12 @@ def spam_worker(chat_id, worker_id):
             
             # Send status update every 5 messages
             if counter % 5 == 0:
-                asyncio.run_coroutine_threadsafe(
-                    bot.send_message(
-                        chat_id,
-                        f"📊 Progress: {counter} messages sent\n"
-                        f"✅ Success: {success_count}\n"
-                        f"❌ Failed: {unsuccess_count}",
-                        disable_notification=True
-                    ),
-                    asyncio.get_event_loop()
+                bot.send_message(
+                    chat_id,
+                    f"📊 Progress: {counter} messages sent\n"
+                    f"✅ Success: {success_count}\n"
+                    f"❌ Failed: {unsuccess_count}",
+                    disable_notification=True
                 )
             
             # Random delay
@@ -574,27 +566,27 @@ def spam_worker(chat_id, worker_id):
             time.sleep(5)
     
     if counter >= current_settings.get('message_count', 100):
-        asyncio.run_coroutine_threadsafe(
-            bot.send_message(
-                chat_id,
-                f"✅ Completed {counter} messages!",
-                disable_notification=True
-            ),
-            asyncio.get_event_loop()
+        bot.send_message(
+            chat_id,
+            f"✅ Completed {counter} messages!",
+            disable_notification=True
         )
     
     spam_active = False
 
+# ========== INITIALIZE ==========
+user_manager = UserManager()
+
 # ========== MAIN FUNCTION ==========
-async def main():
+if __name__ == "__main__":
     print(print_banner())
-    print(f"🤖 Instagram Spam Bot v3.0")
+    print(f"🤖 Instagram Spam Bot v3.0 (Telebot Version)")
     print(f"👑 Admin User ID: {ADMIN_USER_ID}")
     print(f"💬 Messages loaded: {len(custom_messages)}")
     print(f"🔑 Sessions loaded: {len(instagram_sessions)}")
     
     try:
-        bot_info = await bot.get_me()
+        bot_info = bot.get_me()
         print(f"✅ Bot username: @{bot_info.username}")
         print(f"✅ Bot is ready! Use /start in Telegram")
     except Exception as e:
@@ -603,8 +595,4 @@ async def main():
         sys.exit(1)
     
     print("🚀 Starting bot polling...")
-    await dp.start_polling(bot, skip_updates=True)
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+    bot.infinity_polling()
