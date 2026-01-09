@@ -504,20 +504,16 @@ def print_banner():
 ╚════════════════════════════════════════════╝
     """
 
-def ensure_user_exists(user_id, username=""):
-    """Ensure user exists in database before checking access"""
-    user_id_str = str(user_id)
-    if user_id_str not in user_manager.users:
-        if not username:
-            username = f"User_{user_id}"
-        user_manager.add_user(user_id, username)
-        print(f"✅ Auto-registered user: {user_id} ({username})")
-    return True
-
 def check_user_access(chat_id, user_id, command_name=""):
     """Check if user has access to use the bot"""
-    # First ensure user exists
-    ensure_user_exists(user_id)
+    user_id_str = str(user_id)
+    
+    # First, ensure user exists in database
+    if user_id_str not in user_manager.users:
+        # User doesn't exist - auto-register them
+        username = f"User_{user_id}"
+        user_manager.add_user(user_id, username)
+        print(f"✅ Auto-registered new user: {user_id}")
     
     # Now check access
     has_access, message = user_manager.check_access(user_id)
@@ -547,9 +543,6 @@ def send_start_message(chat_id, user_id=None):
     """Send welcome message"""
     if user_id is None:
         user_id = chat_id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id)
     
     # Check access first
     if not check_user_access(chat_id, user_id, "start"):
@@ -649,9 +642,6 @@ def help_command(message):
     """Show all commands"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "help"):
         return
@@ -695,9 +685,6 @@ def timeleft_command(message):
     """Check trial time left"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "timeleft"):
         return
@@ -725,9 +712,6 @@ def timeleft_command(message):
 def admin_command(message):
     """Admin panel"""
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "admin"):
@@ -785,9 +769,6 @@ def users_command(message):
     """View all users - Admin only"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "users"):
         return
@@ -838,9 +819,6 @@ def users_command(message):
 def broadcast_command(message):
     """Broadcast message to all users"""
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "broadcast"):
@@ -895,9 +873,6 @@ def addtime_command(message):
     """Add time to user's subscription - Admin only"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "addtime"):
         return
@@ -932,9 +907,6 @@ def addmsg_command(message):
     """Add message for spamming"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "addmsg"):
         return
@@ -948,9 +920,6 @@ def addmsg_command(message):
 
 def process_new_message(message):
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "addmsg"):
@@ -969,9 +938,6 @@ def process_new_message(message):
 def listmsg_command(message):
     """List all saved messages"""
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "listmsg"):
@@ -1002,9 +968,6 @@ def addsession_command(message):
     """Add Instagram session"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "addsession"):
         return
@@ -1027,9 +990,6 @@ def addsession_command(message):
 
 def process_new_session(message):
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "addsession"):
@@ -1072,9 +1032,6 @@ def process_new_session(message):
 def sessions_command(message):
     """View Instagram sessions"""
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "sessions"):
@@ -1121,9 +1078,6 @@ def setup_command(message):
     """Configure settings"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
         return
@@ -1156,9 +1110,6 @@ def setup_command(message):
 def start_spam_command(message):
     """Start sending messages"""
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "start_spam"):
@@ -1221,8 +1172,6 @@ def spam_worker(chat_id, thread_id, user_id):
     
     # Check access periodically
     def check_access_periodically():
-        # Ensure user exists first
-        ensure_user_exists(user_id)
         has_access, _ = user_manager.check_access(user_id)
         if not has_access:
             bot.send_message(chat_id, "⏰ <b>Trial expired during spam!</b> Stopping...")
@@ -1378,9 +1327,6 @@ def stop_spam_command(message):
     """Stop sending messages"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "stop_spam"):
         return
@@ -1398,9 +1344,6 @@ def stop_spam_command(message):
 def stats_command(message):
     """Show statistics"""
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "stats"):
@@ -1448,9 +1391,6 @@ def reset_command(message):
     """Reset statistics"""
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "reset"):
         return
@@ -1475,6 +1415,8 @@ def handle_callbacks(call):
     chat_id = call.message.chat.id
     username = call.from_user.username or call.from_user.first_name or "User"
     
+    print(f"\nCallback received: User {user_id} clicked {call.data}")
+    
     # FIRST: Always ensure user exists in database
     user_manager.add_user(user_id, username)
     
@@ -1497,6 +1439,9 @@ To continue using the bot, you need to purchase access.
         bot.answer_callback_query(call.id)
         return
     
+    bot.answer_callback_query(call.id)  # Acknowledge the click
+    
+    # Handle different callbacks
     if call.data == "main_menu":
         try:
             bot.delete_message(chat_id, call.message.message_id)
@@ -1505,168 +1450,83 @@ To continue using the bot, you need to purchase access.
         send_start_message(chat_id, user_id)
     
     elif call.data == "admin_panel":
-        # Create fake message for admin command
-        class FakeMessage:
-            def __init__(self, chat_id, user_id, username):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {
-                    'id': user_id,
-                    'username': username or 'User',
-                    'first_name': username or 'User'
-                })
-                self.text = "/admin"
-        
-        fake_msg = FakeMessage(chat_id, user_id, username)
-        admin_command(fake_msg)
-        bot.answer_callback_query(call.id)
+        admin_command(call.message)
     
     elif call.data == "admin_users":
-        # Create fake message for users command
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        users_command(fake_msg)
-        bot.answer_callback_query(call.id)
+        users_command(call.message)
     
     elif call.data == "admin_stats":
-        # Create fake message for stats command
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-                self.text = "/stats"
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        stats_command(fake_msg)
-        bot.answer_callback_query(call.id)
+        stats_command(call.message)
     
     elif call.data == "admin_broadcast":
         msg = bot.send_message(chat_id, "📢 Enter broadcast message:")
         bot.register_next_step_handler(msg, lambda m: broadcast_command_wrapper(m, user_id))
-        bot.answer_callback_query(call.id)
     
     elif call.data == "admin_addtime":
         msg = bot.send_message(chat_id, "⏰ Enter user ID and hours (format: user_id hours):")
         bot.register_next_step_handler(msg, lambda m: addtime_command_wrapper(m, user_id))
-        bot.answer_callback_query(call.id)
     
     elif call.data == "add_msg":
         msg = bot.send_message(chat_id, "✍️ Send message:")
         bot.register_next_step_handler(msg, process_new_message)
-        bot.answer_callback_query(call.id)
     
     elif call.data == "list_msg":
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
-        # Create fake message
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-                self.text = "/listmsg"
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        listmsg_command(fake_msg)
+        listmsg_command(call.message)
     
     elif call.data == "add_session":
         msg = bot.send_message(chat_id, "🔑 Send session ID:")
         bot.register_next_step_handler(msg, process_new_session)
-        bot.answer_callback_query(call.id)
     
     elif call.data == "list_sessions":
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
-        # Create fake message
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-                self.text = "/sessions"
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        sessions_command(fake_msg)
+        sessions_command(call.message)
     
     elif call.data == "setup":
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
-        # Create fake message
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-                self.text = "/setup"
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        setup_command(fake_msg)
+        setup_command(call.message)
     
     elif call.data == "start_spam":
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
-        # Create fake message
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-                self.text = "/start_spam"
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        start_spam_command(fake_msg)
+        start_spam_command(call.message)
     
     elif call.data == "stop_spam":
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
-        # Create fake message
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-                self.text = "/stop_spam"
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        stop_spam_command(fake_msg)
+        stop_spam_command(call.message)
     
     elif call.data == "stats":
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
-        # Create fake message
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id})
-                self.from_user = type('obj', (object,), {'id': user_id})
-                self.text = "/stats"
-        
-        fake_msg = FakeMessage(chat_id, user_id)
-        stats_command(fake_msg)
+        stats_command(call.message)
     
     elif call.data == "set_target":
         msg = bot.send_message(chat_id, "🎯 Send target username:")
         bot.register_next_step_handler(msg, process_target)
-        bot.answer_callback_query(call.id)
     
     elif call.data == "set_url":
         msg = bot.send_message(chat_id, "🔗 Send Instagram DM URL:")
         bot.register_next_step_handler(msg, process_url)
-        bot.answer_callback_query(call.id)
     
     elif call.data == "set_count":
         msg = bot.send_message(chat_id, "📊 Send message count (1-1000):")
         bot.register_next_step_handler(msg, process_count)
-        bot.answer_callback_query(call.id)
     
     elif call.data == "set_delay":
         keyboard = InlineKeyboardMarkup()
@@ -1679,18 +1539,16 @@ To continue using the bot, you need to purchase access.
             InlineKeyboardButton(text="🐢 3-5s (NORMAL)", callback_data="delay_3_5")
         )
         bot.send_message(chat_id, "⏱️ Select delay between messages:", reply_markup=keyboard)
-        bot.answer_callback_query(call.id)
     
     elif call.data.startswith("delay_"):
         delays = call.data.split("_")[1:]
         current_settings['delay_min'] = float(delays[0])
         current_settings['delay_max'] = float(delays[1])
         bot.send_message(chat_id, f"✅ Delay: {delays[0]}-{delays[1]} seconds")
-        bot.answer_callback_query(call.id)
     
     elif call.data == "delete_msg_menu":
         if not custom_messages:
-            bot.answer_callback_query(call.id, "No messages!")
+            bot.send_message(chat_id, "📭 No messages!")
             return
         
         keyboard = InlineKeyboardMarkup()
@@ -1706,22 +1564,14 @@ To continue using the bot, you need to purchase access.
             index = int(call.data.split("_")[2])
             custom_messages.pop(index)
             save_messages()
-            bot.answer_callback_query(call.id, "✅ Message deleted!")
-            # Create fake message for listmsg
-            class FakeMessage:
-                def __init__(self, chat_id, user_id):
-                    self.chat = type('obj', (object,), {'id': chat_id})
-                    self.from_user = type('obj', (object,), {'id': user_id})
-                    self.text = "/listmsg"
-            
-            fake_msg = FakeMessage(chat_id, user_id)
-            listmsg_command(fake_msg)
+            bot.send_message(chat_id, "✅ Message deleted!")
+            listmsg_command(call.message)
         except:
-            bot.answer_callback_query(call.id, "❌ Error!")
+            bot.send_message(chat_id, "❌ Error deleting message!")
     
     elif call.data == "delete_session_menu":
         if not instagram_sessions:
-            bot.answer_callback_query(call.id, "No sessions!")
+            bot.send_message(chat_id, "🔐 No sessions!")
             return
         
         keyboard = InlineKeyboardMarkup()
@@ -1738,21 +1588,10 @@ To continue using the bot, you need to purchase access.
             index = int(call.data.split("_")[2])
             instagram_sessions.pop(index)
             save_sessions()
-            bot.answer_callback_query(call.id, "✅ Session deleted!")
-            # Create fake message for sessions
-            class FakeMessage:
-                def __init__(self, chat_id, user_id):
-                    self.chat = type('obj', (object,), {'id': chat_id})
-                    self.from_user = type('obj', (object,), {'id': user_id})
-                    self.text = "/sessions"
-            
-            fake_msg = FakeMessage(chat_id, user_id)
-            sessions_command(fake_msg)
+            bot.send_message(chat_id, "✅ Session deleted!")
+            sessions_command(call.message)
         except:
-            bot.answer_callback_query(call.id, "❌ Error!")
-    
-    else:
-        bot.answer_callback_query(call.id)
+            bot.send_message(chat_id, "❌ Error deleting session!")
 
 def broadcast_command_wrapper(message, user_id):
     """Wrapper for broadcast command from callback"""
@@ -1780,9 +1619,6 @@ def addtime_command_wrapper(message, user_id):
 def process_target(message):
     user_id = message.from_user.id
     
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
-    
     # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
         return
@@ -1792,9 +1628,6 @@ def process_target(message):
 
 def process_url(message):
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
@@ -1820,9 +1653,6 @@ def process_url(message):
 
 def process_count(message):
     user_id = message.from_user.id
-    
-    # Ensure user exists
-    ensure_user_exists(user_id, message.from_user.username or message.from_user.first_name)
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
