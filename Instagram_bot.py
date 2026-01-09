@@ -39,7 +39,6 @@ class UserManager:
     
     def add_user(self, user_id: str, username: str = ""):
         if str(user_id) not in self.users:
-            # Give EVERYONE 30 DAYS FREE ACCESS automatically
             self.users[str(user_id)] = {
                 "username": username,
                 "plan": "30_days_free",
@@ -55,7 +54,7 @@ class UserManager:
     def check_access(self, user_id: str) -> bool:
         user_data = self.users.get(str(user_id))
         if not user_data:
-            return True  # Allow access if user not in database
+            return True
         
         if user_data.get("is_admin", False):
             return True
@@ -78,6 +77,16 @@ class UserManager:
     def is_admin(self, user_id: str) -> bool:
         user_data = self.users.get(str(user_id))
         return user_data.get("is_admin", False) if user_data else False
+    
+    def get_all_users(self):
+        return self.users
+    
+    def delete_user(self, user_id: str):
+        if str(user_id) in self.users:
+            del self.users[str(user_id)]
+            self.save_users()
+            return True
+        return False
 
 # ========== GLOBAL VARIABLES ==========
 spam_active = False
@@ -96,7 +105,7 @@ current_settings = {
     "active_sessions": []
 }
 
-# State tracking for conversations
+# State tracking
 user_states = {}
 
 # ========== DATA MANAGEMENT ==========
@@ -210,15 +219,99 @@ def start_command(message):
     user_id = str(message.from_user.id)
     username = message.from_user.username or message.from_user.first_name
     
-    # Add user if not exists
     user_manager.add_user(user_id, username)
     
-    # Make configured user admin
     if user_id == ADMIN_USER_ID:
         user_manager.users[user_id]["is_admin"] = True
         user_manager.save_users()
     
     send_start_message(message.chat.id)
+
+@bot.message_handler(commands=['admin'])
+def admin_command(message):
+    """Admin panel command"""
+    user_id = str(message.from_user.id)
+    
+    if not user_manager.is_admin(user_id):
+        bot.send_message(message.chat.id, "❌ You are not authorized to use admin commands!")
+        return
+    
+    admin_text = """
+🔐 <b>Admin Panel</b>
+
+📊 <b>Admin Commands:</b>
+
+👥 <b>User Management:</b>
+• /users - View all users
+• /addadmin [user_id] - Add admin
+• /removeadmin [user_id] - Remove admin
+• /deleteuser [user_id] - Delete user
+
+⚙️ <b>Bot Management:</b>
+• /broadcast [message] - Broadcast to all users
+• /stats_all - Detailed statistics
+• /cleanup - Clean old data
+
+📁 <b>Data Management:</b>
+• /backup - Create backup
+• /restore - Restore from backup
+• /reset_all - Reset all data
+"""
+    
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(text="👥 View Users", callback_data="admin_view_users"),
+        InlineKeyboardButton(text="📊 Stats", callback_data="admin_stats")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="📢 Broadcast", callback_data="admin_broadcast"),
+        InlineKeyboardButton(text="🗑️ Cleanup", callback_data="admin_cleanup")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
+    )
+    
+    bot.send_message(message.chat.id, admin_text, reply_markup=keyboard)
+
+@bot.message_handler(commands=['users'])
+def users_command(message):
+    """View all users (Admin only)"""
+    user_id = str(message.from_user.id)
+    
+    if not user_manager.is_admin(user_id):
+        bot.send_message(message.chat.id, "❌ Admin only!")
+        return
+    
+    users = user_manager.get_all_users()
+    if not users:
+        bot.send_message(message.chat.id, "📭 No users found!")
+        return
+    
+    response = "👥 <b>All Users:</b>\n\n"
+    for uid, data in users.items():
+        username = data.get('username', 'Unknown')
+        plan = data.get('plan', 'N/A')
+        is_admin = "✅" if data.get('is_admin') else "❌"
+        active = "🟢" if data.get('active', True) else "🔴"
+        
+        response += f"{active} ID: <code>{uid}</code>\n"
+        response += f"   👤: {username}\n"
+        response += f"   👑 Admin: {is_admin}\n"
+        response += f"   📅 Plan: {plan}\n\n"
+    
+    response += f"Total: {len(users)} users"
+    
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(text="➕ Add Admin", callback_data="admin_add_admin"),
+        InlineKeyboardButton(text="➖ Remove Admin", callback_data="admin_remove_admin")
+    )
+    keyboard.add(
+        InlineKeyboardButton(text="🗑️ Delete User", callback_data="admin_delete_user"),
+        InlineKeyboardButton(text="◀️ Back", callback_data="admin_panel")
+    )
+    
+    bot.send_message(message.chat.id, response, reply_markup=keyboard)
 
 @bot.message_handler(commands=['addmsg'])
 def addmsg_command(message):
@@ -259,14 +352,51 @@ def listmsg_command(message):
     
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
-        InlineKeyboardButton(text="❌ Delete", callback_data="delete_msg_menu"),
-        InlineKeyboardButton(text="✏️ Edit", callback_data="edit_msg_menu")
+        InlineKeyboardButton(text="🗑️ Delete Message", callback_data="delete_msg_menu"),
+        InlineKeyboardButton(text="✏️ Edit Message", callback_data="edit_msg_menu")
     )
     keyboard.add(
         InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
     )
     
     bot.send_message(message.chat.id, response, reply_markup=keyboard)
+
+@bot.callback_query_handler(func=lambda call: call.data == "delete_msg_menu")
+def delete_msg_menu_callback(call):
+    """Show delete message menu"""
+    if not custom_messages:
+        bot.answer_callback_query(call.id, "No messages to delete!")
+        return
+    
+    keyboard = InlineKeyboardMarkup()
+    for i in range(len(custom_messages)):
+        preview = custom_messages[i][:30] + "..." if len(custom_messages[i]) > 30 else custom_messages[i]
+        keyboard.add(InlineKeyboardButton(text=f"❌ Delete: {preview}", callback_data=f"delete_msg_{i}"))
+    
+    keyboard.add(InlineKeyboardButton(text="◀️ Back", callback_data="list_msg"))
+    
+    bot.edit_message_text(
+        "🗑️ <b>Select message to delete:</b>",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=keyboard
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("delete_msg_"))
+def delete_msg_callback(call):
+    """Delete selected message"""
+    try:
+        index = int(call.data.split("_")[2])
+        if 0 <= index < len(custom_messages):
+            deleted_msg = custom_messages.pop(index)
+            save_messages()
+            
+            bot.answer_callback_query(call.id, f"✅ Message deleted!")
+            
+            # Show updated list
+            listmsg_command(call.message)
+    except:
+        bot.answer_callback_query(call.id, "❌ Error deleting message!")
 
 @bot.message_handler(commands=['addsession'])
 def addsession_command(message):
@@ -277,7 +407,6 @@ def addsession_command(message):
 def process_new_session(message):
     session_id = message.text.strip()
     
-    # Save session
     session_data = {
         "session_id": session_id,
         "username": "Unknown",
@@ -310,13 +439,50 @@ def sessions_command(message):
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
         InlineKeyboardButton(text="➕ Add Session", callback_data="add_session"),
-        InlineKeyboardButton(text="❌ Delete Session", callback_data="delete_session_menu")
+        InlineKeyboardButton(text="🗑️ Delete Session", callback_data="delete_session_menu")
     )
     keyboard.add(
         InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
     )
     
     bot.send_message(message.chat.id, response, reply_markup=keyboard)
+
+@bot.callback_query_handler(func=lambda call: call.data == "delete_session_menu")
+def delete_session_menu_callback(call):
+    """Show delete session menu"""
+    if not instagram_sessions:
+        bot.answer_callback_query(call.id, "No sessions to delete!")
+        return
+    
+    keyboard = InlineKeyboardMarkup()
+    for i in range(len(instagram_sessions)):
+        username = instagram_sessions[i].get('username', 'Unknown')
+        keyboard.add(InlineKeyboardButton(text=f"❌ Delete: {username}", callback_data=f"delete_session_{i}"))
+    
+    keyboard.add(InlineKeyboardButton(text="◀️ Back", callback_data="sessions"))
+    
+    bot.edit_message_text(
+        "🗑️ <b>Select session to delete:</b>",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=keyboard
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("delete_session_"))
+def delete_session_callback(call):
+    """Delete selected session"""
+    try:
+        index = int(call.data.split("_")[2])
+        if 0 <= index < len(instagram_sessions):
+            deleted_session = instagram_sessions.pop(index)
+            save_sessions()
+            
+            bot.answer_callback_query(call.id, f"✅ Session deleted!")
+            
+            # Show updated list
+            sessions_command(call.message)
+    except:
+        bot.answer_callback_query(call.id, "❌ Error deleting session!")
 
 @bot.message_handler(commands=['setup'])
 def setup_command(message):
@@ -335,6 +501,23 @@ def setup_command(message):
     )
     
     bot.send_message(message.chat.id, "⚙️ <b>Setup Menu:</b>\n\nConfigure your spam settings:", reply_markup=keyboard)
+
+@bot.callback_query_handler(func=lambda call: call.data == "set_count")
+def set_count_callback(call):
+    """Set message count"""
+    msg = bot.send_message(call.message.chat.id, "📊 Enter total number of messages to send:")
+    bot.register_next_step_handler(msg, process_message_count)
+
+def process_message_count(message):
+    try:
+        count = int(message.text)
+        if count > 0:
+            current_settings['message_count'] = count
+            bot.send_message(message.chat.id, f"✅ Message count set to: {count}")
+        else:
+            bot.send_message(message.chat.id, "❌ Please enter a positive number!")
+    except:
+        bot.send_message(message.chat.id, "❌ Please enter a valid number!")
 
 @bot.message_handler(commands=['start_spam'])
 def start_spam_command(message):
@@ -361,10 +544,8 @@ def start_spam_command(message):
         bot.send_message(message.chat.id, "⚠️ Spam is already running!")
         return
     
-    # Start spam
     spam_active = True
     
-    # Start single spam thread
     thread = threading.Thread(
         target=spam_worker, 
         args=(message.chat.id, 0)
@@ -430,6 +611,14 @@ def reset_command(message):
 def main_menu_callback(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
     send_start_message(call.message.chat.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_panel")
+def admin_panel_callback(call):
+    admin_command(call.message)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_view_users")
+def admin_view_users_callback(call):
+    users_command(call.message)
 
 @bot.callback_query_handler(func=lambda call: call.data == "add_msg")
 def add_msg_callback(call):
@@ -531,13 +720,11 @@ def spam_worker(chat_id, worker_id):
             if not custom_messages:
                 break
             
-            # Select random message
             msg = random.choice(custom_messages)
             formatted_msg = msg.replace("{target}", current_settings['target'])
             
             counter += 1
             
-            # Simulate sending (85% success rate)
             success = random.random() > 0.15
             
             if success:
@@ -547,7 +734,6 @@ def spam_worker(chat_id, worker_id):
                 with counter_lock:
                     unsuccess_count += 1
             
-            # Send status update every 5 messages
             if counter % 5 == 0:
                 bot.send_message(
                     chat_id,
@@ -557,7 +743,6 @@ def spam_worker(chat_id, worker_id):
                     disable_notification=True
                 )
             
-            # Random delay
             delay = random.uniform(current_settings['delay_min'], current_settings['delay_max'])
             time.sleep(delay)
             
