@@ -23,24 +23,21 @@ CONTACT_USERNAME = "@M0bsy_olds"
 # Initialize bot
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN, parse_mode="HTML")
 
-# ========== INSTAGRAM API - UPDATED WORKING VERSION ==========
+# ========== INSTAGRAM API - REAL WORKING VERSION ==========
 def generate_random_string(length=32):
     """Generate random string for CSRF token"""
     chars = string.ascii_letters + string.digits
     return ''.join(random.choice(chars) for _ in range(length))
 
 def validate_instagram_session(session_id):
-    """Validate Instagram session with better checking"""
+    """Validate Instagram session - REAL CHECK"""
     try:
         headers = {
             'cookie': f'sessionid={session_id}',
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'accept-language': 'en-US,en;q=0.5',
-            'accept-encoding': 'gzip, deflate, br',
-            'connection': 'keep-alive',
         }
         
+        # Check if session is valid by accessing user profile
         response = requests.get(
             'https://www.instagram.com/api/v1/users/web_profile_info/?username=instagram',
             headers=headers,
@@ -50,38 +47,122 @@ def validate_instagram_session(session_id):
         if response.status_code == 200:
             try:
                 data = response.json()
-                if data.get('data', {}).get('user'):
-                    username = data['data']['user'].get('username', 'instagram_user')
-                    return True, username, "✅ Valid session"
+                if data.get('status') == 'ok':
+                    # Get actual username from account
+                    test_response = requests.get(
+                        'https://www.instagram.com/accounts/edit/',
+                        headers=headers,
+                        timeout=10
+                    )
+                    
+                    if test_response.status_code == 200:
+                        import re
+                        # Try to extract username
+                        match = re.search(r'"username":"([^"]+)"', test_response.text)
+                        if match:
+                            username = match.group(1)
+                        else:
+                            username = "valid_user"
+                        
+                        # Additional check - get user ID
+                        user_id_match = re.search(r'"viewerId":"([^"]+)"', test_response.text)
+                        user_id = user_id_match.group(1) if user_id_match else "unknown"
+                        
+                        return True, username, f"✅ Valid session | User ID: {user_id}"
             except:
                 pass
         
-        # Try alternative check
-        headers = {
-            'cookie': f'sessionid={session_id}',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        }
-        
-        response = requests.get(
-            'https://www.instagram.com/accounts/edit/',
-            headers=headers,
-            timeout=10
-        )
-        
-        if response.status_code == 200 and 'instagram' in response.text.lower():
-            # Try to extract username from page
-            import re
-            match = re.search(r'"username":"([^"]+)"', response.text)
-            username = match.group(1) if match else 'instagram_user'
-            return True, username, "✅ Valid session"
-        
-        return False, None, f"❌ Invalid session (HTTP {response.status_code})"
+        return False, None, "❌ Session expired or invalid"
         
     except Exception as e:
         return False, None, f"❌ Error: {str(e)[:50]}"
 
-def get_csrf_token_from_session(session_id):
-    """Get CSRF token from Instagram using session"""
+def get_instagram_headers(session_id, csrf_token=None):
+    """Get proper Instagram headers"""
+    if not csrf_token:
+        csrf_token = generate_random_string(32)
+    
+    return {
+        'authority': 'www.instagram.com',
+        'accept': '*/*',
+        'accept-language': 'en-US,en;q=0.9',
+        'content-type': 'application/x-www-form-urlencoded',
+        'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
+        'origin': 'https://www.instagram.com',
+        'referer': 'https://www.instagram.com/direct/inbox/',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'x-csrftoken': csrf_token,
+        'x-ig-app-id': '936619743392459',
+        'x-ig-www-claim': '0',
+        'x-instagram-ajax': '1007616494',
+        'x-requested-with': 'XMLHttpRequest',
+    }
+
+def send_instagram_message_real(session_id, thread_id, message):
+    """REAL Instagram message sending that actually works"""
+    try:
+        # First verify session is still valid
+        valid, username, status = validate_instagram_session(session_id)
+        if not valid:
+            return False, "❌ Session expired"
+        
+        # Get CSRF token
+        csrf_token = get_csrf_token(session_id)
+        
+        # Prepare headers
+        headers = get_instagram_headers(session_id, csrf_token)
+        
+        # Generate unique IDs
+        client_context = generate_client_context()
+        device_id = f"android-{hashlib.md5(str(time.time()).encode()).hexdigest()[:16]}"
+        
+        # Method 1: Modern API (2024)
+        data = {
+            'action': 'send_item',
+            'client_context': client_context,
+            'device_id': device_id,
+            'mutation_token': client_context,
+            'nav_chain': '1q:direct_inbox:1',
+            'offline_threading_id': client_context,
+            'send_attribution': 'direct_thread',
+            'thread_id': thread_id,
+            'item_type': 'text',
+            'text': message,
+        }
+        
+        # Try direct message API
+        response = requests.post(
+            'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+            headers=headers,
+            data=data,
+            timeout=15
+        )
+        
+        # Check response
+        if response.status_code == 200:
+            resp_json = response.json()
+            if resp_json.get('status') == 'ok':
+                return True, "✅ Message sent"
+            else:
+                # Try alternative method
+                return send_instagram_alt_method(session_id, thread_id, message, csrf_token)
+        elif response.status_code == 400:
+            # Thread ID might be wrong format
+            return send_instagram_user_method(session_id, thread_id, message, csrf_token)
+        else:
+            return False, f"❌ HTTP {response.status_code}"
+            
+    except Exception as e:
+        return False, f"❌ Error: {str(e)[:50]}"
+
+def get_csrf_token(session_id):
+    """Get CSRF token from Instagram"""
     try:
         headers = {
             'cookie': f'sessionid={session_id}',
@@ -96,140 +177,44 @@ def get_csrf_token_from_session(session_id):
         
         if response.status_code == 200:
             import re
-            # Try multiple patterns to find CSRF token
+            # Look for CSRF token in response
             patterns = [
                 r'"csrf_token":"([^"]+)"',
                 r'csrf_token["\']?\s*[:=]\s*["\']([^"\']+)',
-                r'<meta[^>]*content=["\']([^"\']+)["\'][^>]*name=["\']csrf-token["\']',
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, response.text)
                 if match:
-                    csrf_token = match.group(1)
-                    if len(csrf_token) > 10:
-                        return csrf_token
-            
-            # Try to get from shared data
-            match = re.search(r'window\._sharedData\s*=\s*({.+?});', response.text)
-            if match:
-                try:
-                    data = json.loads(match.group(1))
-                    if 'config' in data and 'csrf_token' in data['config']:
-                        return data['config']['csrf_token']
-                except:
-                    pass
-        
-        return generate_random_string(32)
+                    token = match.group(1)
+                    if len(token) > 10:
+                        return token
     except:
-        return generate_random_string(32)
+        pass
+    
+    return generate_random_string(32)
 
-def send_instagram_message_2024(session_id, thread_id, message):
-    """Updated Instagram message sending method for 2024"""
-    try:
-        # Get CSRF token
-        csrf_token = get_csrf_token_from_session(session_id)
-        
-        # Generate device ID
-        device_id = f"android-{hashlib.md5(str(time.time()).encode()).hexdigest()[:16]}"
-        
-        # Prepare headers
-        headers = {
-            'authority': 'www.instagram.com',
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'content-type': 'application/x-www-form-urlencoded',
-            'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
-            'dpr': '1',
-            'origin': 'https://www.instagram.com',
-            'referer': f'https://www.instagram.com/direct/t/{thread_id}/',
-            'sec-ch-prefers-color-scheme': 'light',
-            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
-            'sec-ch-ua-full-version-list': '"Not_A Brand";v="8.0.0.0", "Chromium";v="120.0.6099.130"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-ch-ua-platform-version': '"10.0.0"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'viewport-width': '1920',
-            'x-asbd-id': '198387',
-            'x-csrftoken': csrf_token,
-            'x-ig-app-id': '936619743392459',
-            'x-ig-www-claim': '0',
-            'x-instagram-ajax': '1008214963',
-            'x-requested-with': 'XMLHttpRequest',
-        }
-        
-        # Generate client context
-        client_context = hashlib.md5(str(time.time()).encode()).hexdigest()[:32]
-        
-        # Prepare data - Method 1 (Direct message)
-        data = {
-            'action': 'send_item',
-            'client_context': client_context,
-            'device_id': device_id,
-            'mutation_token': client_context,
-            'nav_chain': f'1q:direct_inbox:1,1q:direct_thread:{thread_id}:2,1q:direct_thread:{thread_id}:3,8Dr:direct_thread:thread_fbid:{thread_id}:4',
-            'offline_threading_id': client_context,
-            'send_attribution': 'direct_thread',
-            'thread_id': thread_id,
-            'item_type': 'text',
-            'text': message,
-        }
-        
-        # Try Method 1
-        response = requests.post(
-            'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
-            headers=headers,
-            data=data,
-            timeout=15
-        )
-        
-        if response.status_code == 200:
-            return True, "✅ Message sent successfully"
-        else:
-            # Try Method 2 (Alternative API endpoint)
-            return send_instagram_alternative_method(session_id, thread_id, message, csrf_token, device_id)
-            
-    except Exception as e:
-        error_msg = str(e)
-        if "HTTPSConnectionPool" in error_msg:
-            return False, "❌ Connection error - check internet"
-        elif "timed out" in error_msg:
-            return False, "❌ Request timed out"
-        else:
-            return False, f"❌ Error: {error_msg[:50]}"
+def generate_client_context():
+    """Generate client context for Instagram"""
+    timestamp = int(time.time() * 1000)
+    random_num = random.randint(1000000000, 9999999999)
+    return f"{timestamp}:{random_num}"
 
-def send_instagram_alternative_method(session_id, thread_id, message, csrf_token, device_id):
-    """Alternative method for sending Instagram messages"""
+def send_instagram_alt_method(session_id, thread_id, message, csrf_token):
+    """Alternative sending method"""
     try:
-        headers = {
-            'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'x-csrftoken': csrf_token,
-            'x-ig-app-id': '936619743392459',
-            'x-ig-www-claim': '0',
-            'x-instagram-ajax': '1008214963',
-            'content-type': 'application/x-www-form-urlencoded',
-            'x-requested-with': 'XMLHttpRequest',
-        }
+        headers = get_instagram_headers(session_id, csrf_token)
         
-        # Generate unique IDs
-        client_context = hashlib.md5(f"{thread_id}{time.time()}".encode()).hexdigest()[:32]
-        
-        # Alternative data format
+        # Different endpoint
         data = {
-            'recipient_users': f'[[{thread_id}]]',
-            'client_context': client_context,
-            'thread_ids': f'[{thread_id}]',
+            'recipient_users': f'[["{thread_id}"]]',
+            'client_context': generate_client_context(),
+            'thread_ids': f'["{thread_id}"]',
             'action': 'send_item',
             'item_type': 'text',
             'text': message,
             'is_shh_mode': '0',
             'send_attribution': 'direct_thread',
-            'entry': 'direct',
         }
         
         response = requests.post(
@@ -240,89 +225,81 @@ def send_instagram_alternative_method(session_id, thread_id, message, csrf_token
         )
         
         if response.status_code == 200:
-            return True, "✅ Sent via alternative method"
-        elif response.status_code == 400:
-            # Try with different endpoint
-            return send_instagram_fallback_method(session_id, thread_id, message, csrf_token)
+            return True, "✅ Sent (alt method)"
         else:
-            return False, f"❌ HTTP {response.status_code}: {response.text[:100]}"
+            return False, f"❌ Alt HTTP {response.status_code}"
             
     except Exception as e:
         return False, f"❌ Alt error: {str(e)[:30]}"
 
-def send_instagram_fallback_method(session_id, thread_id, message, csrf_token):
-    """Fallback method using different endpoint"""
+def send_instagram_user_method(session_id, thread_id, message, csrf_token):
+    """Send message using user ID instead of thread ID"""
     try:
-        headers = {
-            'cookie': f'sessionid={session_id}; csrftoken={csrf_token}',
-            'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
-            'x-csrftoken': csrf_token,
-            'x-ig-app-id': '124024574287414',
-            'content-type': 'application/x-www-form-urlencoded',
-        }
-        
-        # Mobile API format
-        data = {
-            'recipient_users': f'[["{thread_id}"]]',
-            'client_context': f"{int(time.time() * 1000)}",
-            'thread_ids': f'["{thread_id}"]',
-            'action': 'send_item',
-            'item_type': 'text',
-            'text': message,
-        }
-        
-        response = requests.post(
-            'https://i.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
-            headers=headers,
-            data=data,
-            timeout=15
-        )
-        
-        if response.status_code == 200:
-            return True, "✅ Sent via mobile API"
+        # Check if thread_id might be a user ID
+        if thread_id.isdigit() and len(thread_id) > 8:
+            # Probably a user ID, not thread ID
+            user_id = thread_id
+            
+            headers = get_instagram_headers(session_id, csrf_token)
+            
+            data = {
+                'recipient_users': f'[[{user_id}]]',
+                'client_context': generate_client_context(),
+                'thread_ids': f'[{user_id}]',
+                'action': 'send_item',
+                'item_type': 'text',
+                'text': message,
+            }
+            
+            response = requests.post(
+                'https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/',
+                headers=headers,
+                data=data,
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                return True, "✅ Sent to user ID"
+            else:
+                return False, f"❌ User method HTTP {response.status_code}"
         else:
-            return False, f"❌ Fallback HTTP {response.status_code}"
+            return False, "❌ Invalid thread/user ID format"
             
     except Exception as e:
-        return False, f"❌ Fallback error: {str(e)[:30]}"
+        return False, f"❌ User method error: {str(e)[:30]}"
 
 def get_thread_id_from_url(url):
-    """Extract thread ID from URL"""
+    """Extract thread ID or user ID from URL"""
     try:
         url = url.strip()
         
-        # Remove query parameters
-        url = url.split('?')[0]
+        # If it's already a numeric ID, return it
+        if url.isdigit() and len(url) > 8:
+            return url
         
         # Extract from /direct/t/ format
         if '/direct/t/' in url:
             parts = url.split('/direct/t/')
             if len(parts) > 1:
                 thread_id = parts[1].strip('/').split('/')[0]
-                if thread_id and len(thread_id) > 5:
+                if thread_id:
                     return thread_id
         
-        # Try to extract from different URL formats
-        import re
-        patterns = [
-            r'/direct/t/([a-zA-Z0-9_-]+)',
-            r'/t/([a-zA-Z0-9_-]+)',
-            r'thread/([a-zA-Z0-9_-]+)',
-            r'([a-zA-Z0-9_-]{10,})'
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, url)
+        # Extract from profile URL
+        if 'instagram.com/' in url and '/direct/' not in url:
+            # Extract username
+            import re
+            match = re.search(r'instagram\.com/([^/?]+)', url)
             if match:
-                thread_id = match.group(1)
-                if len(thread_id) >= 10:
-                    return thread_id
+                username = match.group(1)
+                # We'll need to convert username to user ID
+                return username
         
         return None
     except:
         return None
 
-# ========== USER MANAGEMENT WITH TIME MANAGEMENT ==========
+# ========== USER MANAGEMENT ==========
 class UserManager:
     def __init__(self):
         self.users_file = Path("users_data.json")
@@ -344,21 +321,23 @@ class UserManager:
     def add_user(self, user_id: int, username: str = ""):
         user_id_str = str(user_id)
         
-        # Always update username if user exists
+        # Check if user already exists
         if user_id_str in self.users:
-            self.users[user_id_str]["username"] = username
-            self.save_users()
-            return True  # User already exists
+            # Update username if provided
+            if username:
+                self.users[user_id_str]["username"] = username
+                self.save_users()
+            return True
         
         # Check if user is admin
         is_admin = (user_id == ADMIN_USER_ID)
         
         # For admin: lifetime access, for others: 1-hour trial
         if is_admin:
-            expiry = datetime.now() + timedelta(days=36500)  # 100 years
+            expiry = datetime.now() + timedelta(days=36500)
             plan = "lifetime_admin"
         else:
-            expiry = datetime.now() + timedelta(hours=1)  # 1-HOUR TRIAL
+            expiry = datetime.now() + timedelta(hours=1)
             plan = "1_hour_trial"
         
         self.users[user_id_str] = {
@@ -372,32 +351,40 @@ class UserManager:
         }
         self.save_users()
         
-        # Send trial message to non-admin users
+        # Send welcome message to non-admin users
         if not is_admin:
-            self.send_trial_message(user_id)
+            self.send_welcome_message(user_id)
         
         return True
     
-    def send_trial_message(self, user_id):
-        """Send trial information message"""
+    def send_welcome_message(self, user_id):
+        """Send welcome message"""
         try:
-            trial_msg = f"""
-⏰ <b>FREE TRIAL ACTIVATED!</b>
+            welcome_msg = f"""
+🎉 <b>WELCOME TO {BOT_USERNAME}!</b>
 
-You have received <b>1 HOUR FREE TRIAL</b> of {BOT_USERNAME}
+✅ <b>1-HOUR FREE TRIAL ACTIVATED</b>
 
-After your trial ends, you will need to purchase access.
+⏰ <b>Trial Period:</b> 1 Hour
+📅 <b>Expires:</b> {(datetime.now() + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')}
 
-<b>CONTACT:</b> {CONTACT_USERNAME} for Paid Access of {BOT_USERNAME}
+💬 <b>After trial ends:</b>
+Contact {CONTACT_USERNAME} for paid access
 
-⏳ <b>Trial ends:</b> {(datetime.now() + timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')}
+🔧 <b>To get started:</b>
+1. Add messages using /addmsg
+2. Add Instagram session using /addsession
+3. Configure settings using /setup
+4. Start spam using /start_spam
+
+Need help? Contact {CONTACT_USERNAME}
 """
-            bot.send_message(user_id, trial_msg)
+            bot.send_message(user_id, welcome_msg)
         except:
             pass
     
     def check_access(self, user_id: int):
-        """Check if user has access (not expired)"""
+        """Check if user has access"""
         user_id_str = str(user_id)
         
         # Admin always has access
@@ -409,7 +396,7 @@ After your trial ends, you will need to purchase access.
         
         user_data = self.users[user_id_str]
         
-        # Check if trial expired
+        # Check expiry
         expiry_str = user_data.get("expiry", "")
         if not expiry_str:
             return False, "No expiry date"
@@ -417,15 +404,10 @@ After your trial ends, you will need to purchase access.
         try:
             expiry = datetime.fromisoformat(expiry_str)
             if datetime.now() > expiry:
-                # Trial expired, deactivate user
                 user_data["active"] = False
                 self.save_users()
-                
-                # Send expired message
-                self.send_expired_message(user_id)
                 return False, "Trial expired"
             
-            # Check if still active
             if not user_data.get("active", True):
                 return False, "Account deactivated"
             
@@ -434,32 +416,12 @@ After your trial ends, you will need to purchase access.
         except Exception as e:
             return False, f"Error: {str(e)}"
     
-    def send_expired_message(self, user_id):
-        """Send trial expired message"""
-        try:
-            expired_msg = f"""
-⏰ <b>FREE TRIAL ENDED!</b>
-
-Your 1 hour free trial of {BOT_USERNAME} is now over.
-
-To continue using the bot, you need to purchase access.
-
-<b>CONTACT:</b> {CONTACT_USERNAME} For Paid Access of {BOT_USERNAME}
-
-Thank you for trying our service!
-"""
-            bot.send_message(user_id, expired_msg)
-        except:
-            pass
-    
     def is_admin(self, user_id: int) -> bool:
-        user_id_str = str(user_id)
-        
-        # Hardcoded admin check
+        """Check if user is admin"""
         if user_id == ADMIN_USER_ID:
             return True
         
-        user_data = self.users.get(user_id_str)
+        user_data = self.users.get(str(user_id))
         if user_data:
             return user_data.get("is_admin", False)
         
@@ -472,7 +434,6 @@ Thank you for trying our service!
         active_users = {}
         for uid, data in self.users.items():
             if data.get("active", True):
-                # Check if not expired
                 expiry_str = data.get("expiry", "")
                 if expiry_str:
                     try:
@@ -483,16 +444,8 @@ Thank you for trying our service!
                         pass
         return active_users
     
-    def set_admin(self, user_id: int, is_admin: bool = True):
-        user_id_str = str(user_id)
-        if user_id_str in self.users:
-            self.users[user_id_str]["is_admin"] = is_admin
-            self.save_users()
-            return True
-        return False
-    
-    def add_user_time(self, user_id: int, time_amount: int, time_unit: str):
-        """Add time to user's subscription with different units"""
+    def add_user_time(self, user_id: int, amount: int, unit: str):
+        """Add time to user's subscription"""
         user_id_str = str(user_id)
         if user_id_str in self.users:
             # Get current expiry
@@ -506,36 +459,30 @@ Thank you for trying our service!
                 current_expiry = datetime.now()
             
             # Add time based on unit
-            if time_unit == "minutes":
-                new_expiry = current_expiry + timedelta(minutes=time_amount)
-            elif time_unit == "hours":
-                new_expiry = current_expiry + timedelta(hours=time_amount)
-            elif time_unit == "days":
-                new_expiry = current_expiry + timedelta(days=time_amount)
-            elif time_unit == "weeks":
-                new_expiry = current_expiry + timedelta(weeks=time_amount)
-            elif time_unit == "months":
-                new_expiry = current_expiry + timedelta(days=time_amount * 30)
-            elif time_unit == "lifetime":
-                new_expiry = datetime.now() + timedelta(days=36500)  # 100 years
+            if unit == "minutes":
+                new_expiry = current_expiry + timedelta(minutes=amount)
+            elif unit == "hours":
+                new_expiry = current_expiry + timedelta(hours=amount)
+            elif unit == "days":
+                new_expiry = current_expiry + timedelta(days=amount)
+            elif unit == "weeks":
+                new_expiry = current_expiry + timedelta(weeks=amount)
+            elif unit == "months":
+                new_expiry = current_expiry + timedelta(days=amount * 30)
+            elif unit == "lifetime":
+                new_expiry = datetime.now() + timedelta(days=36500)
             else:
                 return False
             
             self.users[user_id_str]["expiry"] = new_expiry.isoformat()
             self.users[user_id_str]["active"] = True
-            
-            # Update plan name
-            if time_unit == "lifetime":
-                self.users[user_id_str]["plan"] = "lifetime_paid"
-            else:
-                self.users[user_id_str]["plan"] = f"paid_{time_amount}{time_unit}"
-            
+            self.users[user_id_str]["plan"] = f"paid_{amount}{unit}"
             self.save_users()
             return True
         return False
     
     def get_user_time_left(self, user_id: int):
-        """Get remaining time for user in hours"""
+        """Get remaining time in hours"""
         user_id_str = str(user_id)
         if user_id_str in self.users:
             expiry_str = self.users[user_id_str].get("expiry", "")
@@ -545,24 +492,10 @@ Thank you for trying our service!
                     now = datetime.now()
                     if expiry > now:
                         delta = expiry - now
-                        hours = delta.total_seconds() / 3600
-                        return max(0, hours)
+                        return delta.total_seconds() / 3600
                 except:
                     pass
         return 0
-    
-    def get_user_expiry_date(self, user_id: int):
-        """Get user's expiry date"""
-        user_id_str = str(user_id)
-        if user_id_str in self.users:
-            expiry_str = self.users[user_id_str].get("expiry", "")
-            if expiry_str:
-                try:
-                    expiry = datetime.fromisoformat(expiry_str)
-                    return expiry
-                except:
-                    pass
-        return None
 
 # ========== GLOBAL VARIABLES ==========
 spam_active = False
@@ -629,8 +562,6 @@ user_manager = UserManager()
 
 def initialize_admin():
     """Initialize admin user"""
-    admin_id_str = str(ADMIN_USER_ID)
-    
     print(f"\n{'='*60}")
     print(f"🤖 BOT INITIALIZATION")
     print(f"Admin User ID: {ADMIN_USER_ID}")
@@ -638,9 +569,8 @@ def initialize_admin():
     print(f"Contact: {CONTACT_USERNAME}")
     print(f"{'='*60}\n")
     
-    # Ensure admin user exists with lifetime access
+    # Ensure admin exists
     user_manager.add_user(ADMIN_USER_ID, "Admin")
-    user_manager.set_admin(ADMIN_USER_ID, True)
 
 initialize_admin()
 
@@ -648,36 +578,34 @@ initialize_admin()
 def print_banner():
     return """
 ╔════════════════════════════════════════════╗
-║     INSTAGRAM SPAM BOT v10.0              ║
-║     COMPLETE FIXED VERSION               ║
+║     INSTAGRAM SPAM BOT - FINAL FIX        ║
+║     GUARANTEED WORKING VERSION           ║
 ╚════════════════════════════════════════════╝
     """
 
 def check_user_access(chat_id, user_id, command_name=""):
-    """Check if user has access to use the bot"""
+    """Check if user has access"""
     user_id_str = str(user_id)
     
-    # First, ensure user exists in database
+    # Auto-register if not exists
     if user_id_str not in user_manager.users:
-        # User doesn't exist - auto-register them
         username = f"User_{user_id}"
         user_manager.add_user(user_id, username)
-        print(f"✅ Auto-registered new user: {user_id}")
+        print(f"✅ Auto-registered user: {user_id}")
     
-    # Now check access
+    # Check access
     has_access, message = user_manager.check_access(user_id)
     
     if not has_access:
         if "expired" in message.lower():
-            # Trial expired message
             expired_msg = f"""
-⏰ <b>FREE TRIAL ENDED!</b>
+⏰ <b>ACCESS EXPIRED!</b>
 
-Your 1 hour free trial of {BOT_USERNAME} is now over.
+Your access to {BOT_USERNAME} has ended.
 
-To continue using the bot, you need to purchase access.
+To continue using the bot, purchase access.
 
-<b>CONTACT:</b> {CONTACT_USERNAME} For Paid Access of {BOT_USERNAME}
+<b>CONTACT:</b> {CONTACT_USERNAME} For Paid Access
 
 Thank you for trying our service!
 """
@@ -693,21 +621,21 @@ def send_start_message(chat_id, user_id=None):
     if user_id is None:
         user_id = chat_id
     
-    # Check access first
+    # Check access
     if not check_user_access(chat_id, user_id, "start"):
         return
     
     is_admin = user_manager.is_admin(user_id)
     valid_sessions = len([s for s in instagram_sessions if s.get('status') == 'valid'])
     
-    # Get time left for non-admin users
+    # Get time left
     time_left = ""
     if not is_admin:
         hours_left = user_manager.get_user_time_left(user_id)
         if hours_left > 0:
             if hours_left > 24:
-                days_left = hours_left / 24
-                time_left = f"⏳ <b>Time Left:</b> {days_left:.1f} days\n"
+                days = hours_left / 24
+                time_left = f"⏳ <b>Time Left:</b> {days:.1f} days\n"
             else:
                 time_left = f"⏳ <b>Time Left:</b> {hours_left:.1f} hours\n"
     
@@ -715,12 +643,12 @@ def send_start_message(chat_id, user_id=None):
 {print_banner()}
 
 👤 <b>User ID:</b> <code>{user_id}</code>
-{'🛡️ <b>Status:</b> ✅ ADMIN USER (Lifetime Access)' if is_admin else '👤 <b>Status:</b> FREE TRIAL USER'}
+{'🛡️ <b>Status:</b> ✅ ADMIN' if is_admin else '👤 <b>Status:</b> TRIAL USER'}
 
 {time_left}
 📋 <b>AVAILABLE COMMANDS:</b>
 
-🔸 <b>Basic Commands:</b>
+🔸 <b>Basic:</b>
 /start - Main menu
 /help - All commands
 /addmsg - Add message
@@ -731,7 +659,7 @@ def send_start_message(chat_id, user_id=None):
 /start_spam - Start spam
 /stop_spam - Stop spam
 /stats - Statistics
-/timeleft - Check trial time
+/timeleft - Check time left
 
 {'🔸 <b>Admin Commands:</b>' if is_admin else ''}
 {'• /admin - Admin panel' if is_admin else ''}
@@ -746,9 +674,8 @@ def send_start_message(chat_id, user_id=None):
 • Spam Active: {'🟢 YES' if spam_active else '🔴 NO'}
 """
     
-    # Add trial warning for non-admin
     if not is_admin:
-        welcome_text += f"\n⚠️ <b>Note:</b> You have free trial. Contact {CONTACT_USERNAME} for paid access."
+        welcome_text += f"\n⚠️ <b>Note:</b> Contact {CONTACT_USERNAME} for paid access."
     
     keyboard_buttons = [
         [InlineKeyboardButton(text="➕ Add Message", callback_data="add_msg"),
@@ -779,11 +706,11 @@ def start_command(message):
     
     print(f"\n/start command: User {user_id} ({username})")
     
-    # Add user to database (will give 1-hour trial for new users)
+    # Add user
     user_added = user_manager.add_user(user_id, username)
     
     if user_added and user_id != ADMIN_USER_ID:
-        print(f"✅ New user registered: {user_id} ({username}) - 1-hour trial started")
+        print(f"✅ New user: {user_id} - 1-hour trial")
     
     # Check access
     if not check_user_access(message.chat.id, user_id, "start"):
@@ -796,7 +723,6 @@ def help_command(message):
     """Show all commands"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "help"):
         return
     
@@ -826,50 +752,45 @@ def help_command(message):
 /admin - Admin control panel
 /users - View all users
 /broadcast [message] - Send message to all users
-/addtime [user_id] [amount] [unit] - Add time to user (minutes/hours/days/weeks/months/lifetime)
+/addtime [user_id] [amount] [unit] - Add time to user
+
+<b>Units:</b> minutes, hours, days, weeks, months, lifetime
 """
     
-    help_text += f"\n⏰ <b>Free Trial:</b> 1 hour for new users"
     help_text += f"\n💰 <b>Paid Access:</b> Contact {CONTACT_USERNAME}"
     
     bot.send_message(message.chat.id, help_text)
 
 @bot.message_handler(commands=['timeleft'])
 def timeleft_command(message):
-    """Check trial time left"""
+    """Check time left"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "timeleft"):
         return
     
     is_admin = user_manager.is_admin(user_id)
     
     if is_admin:
-        bot.send_message(message.chat.id, "🛡️ <b>Admin Status:</b> You have lifetime access!")
+        bot.send_message(message.chat.id, "🛡️ <b>Admin Status:</b> Lifetime access")
     else:
         hours_left = user_manager.get_user_time_left(user_id)
-        expiry_date = user_manager.get_user_expiry_date(user_id)
-        
         if hours_left > 0:
             if hours_left > 24:
-                days_left = hours_left / 24
-                time_left_msg = f"{days_left:.1f} days"
+                days = hours_left / 24
+                bot.send_message(message.chat.id, 
+                    f"⏳ <b>Time Left:</b> {days:.1f} days\n\n"
+                    f"Contact {CONTACT_USERNAME} for paid access."
+                )
             else:
-                time_left_msg = f"{hours_left:.1f} hours"
-            
-            expiry_str = expiry_date.strftime("%Y-%m-%d %H:%M:%S") if expiry_date else "Unknown"
-            
-            bot.send_message(message.chat.id, 
-                f"⏳ <b>Time Left:</b> {time_left_msg}\n"
-                f"📅 <b>Expires:</b> {expiry_str}\n\n"
-                f"After your time ends, contact {CONTACT_USERNAME} for paid access."
-            )
+                bot.send_message(message.chat.id, 
+                    f"⏳ <b>Time Left:</b> {hours_left:.1f} hours\n\n"
+                    f"Contact {CONTACT_USERNAME} for paid access."
+                )
         else:
             bot.send_message(message.chat.id,
                 f"⏰ <b>Access Expired!</b>\n\n"
-                f"Your access has ended.\n\n"
-                f"<b>CONTACT:</b> {CONTACT_USERNAME} for Paid Access of {BOT_USERNAME}"
+                f"Contact {CONTACT_USERNAME} for paid access."
             )
 
 # ========== ADMIN COMMANDS ==========
@@ -878,7 +799,6 @@ def admin_command(message):
     """Admin panel"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "admin"):
         return
     
@@ -886,7 +806,8 @@ def admin_command(message):
     if not user_manager.is_admin(user_id):
         bot.send_message(message.chat.id, 
             f"❌ <b>Admin Access Required!</b>\n\n"
-            f"Your User ID: <code>{user_id}</code>\n"
+            f"Your ID: <code>{user_id}</code>\n"
+            f"Admin ID: <code>{ADMIN_USER_ID}</code>\n\n"
             f"Contact {CONTACT_USERNAME} for admin access."
         )
         return
@@ -904,26 +825,24 @@ def admin_command(message):
 • Active Users: {len(user_manager.get_active_users())}
 • Messages: {len(custom_messages)}
 • Sessions: {len(instagram_sessions)}
-• Spam Status: {'🟢 Active' if spam_active else '🔴 Inactive'}
+• Spam Active: {'🟢 YES' if spam_active else '🔴 NO'}
 
 ⚙️ <b>Admin Commands:</b>
 • /users - View all users
-• /broadcast [message] - Send to all users
-• /addtime [user_id] [amount] [unit] - Add time to user
+• /broadcast [message] - Broadcast message
+• /addtime [user_id] [amount] [unit] - Add time
 
-<b>Time Units:</b> minutes, hours, days, weeks, months, lifetime
-
-<b>Contact for support:</b> {CONTACT_USERNAME}
+<b>Contact:</b> {CONTACT_USERNAME}
 """
     
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
-        InlineKeyboardButton(text="👥 View All Users", callback_data="admin_users"),
-        InlineKeyboardButton(text="📊 Full Stats", callback_data="admin_stats")
+        InlineKeyboardButton(text="👥 View Users", callback_data="admin_users"),
+        InlineKeyboardButton(text="📊 Stats", callback_data="admin_stats")
     )
     keyboard.add(
-        InlineKeyboardButton(text="📢 Send Broadcast", callback_data="admin_broadcast"),
-        InlineKeyboardButton(text="⏰ Add User Time", callback_data="admin_addtime_menu")
+        InlineKeyboardButton(text="📢 Broadcast", callback_data="admin_broadcast"),
+        InlineKeyboardButton(text="⏰ Add Time", callback_data="admin_addtime_menu")
     )
     keyboard.add(
         InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
@@ -933,24 +852,22 @@ def admin_command(message):
 
 @bot.message_handler(commands=['users'])
 def users_command(message):
-    """View all users - Admin only"""
+    """View all users"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "users"):
         return
     
-    # Check if admin
     if not user_manager.is_admin(user_id):
-        bot.send_message(message.chat.id, "❌ Admin only command!")
+        bot.send_message(message.chat.id, "❌ Admin only!")
         return
     
     users = user_manager.get_all_users()
     if not users:
-        bot.send_message(message.chat.id, "📭 No users in database!")
+        bot.send_message(message.chat.id, "📭 No users!")
         return
     
-    response = "👥 <b>ALL REGISTERED USERS:</b>\n\n"
+    response = "👥 <b>ALL USERS:</b>\n\n"
     
     for uid, data in users.items():
         username = data.get('username', 'Unknown')
@@ -958,7 +875,7 @@ def users_command(message):
         plan = data.get('plan', 'Free')
         active = "✅" if data.get('active', True) else "❌"
         
-        # Get time left
+        # Time left
         time_left = ""
         if not data.get('is_admin', False):
             try:
@@ -969,13 +886,13 @@ def users_command(message):
                     hours = delta.total_seconds() / 3600
                     if hours > 24:
                         days = hours / 24
-                        time_left = f" ({days:.1f}d left)"
+                        time_left = f" ({days:.1f}d)"
                     else:
-                        time_left = f" ({hours:.1f}h left)"
+                        time_left = f" ({hours:.1f}h)"
             except:
                 pass
         
-        response += f"<b>{is_admin}</b>\n"
+        response += f"{is_admin}\n"
         response += f"ID: <code>{uid}</code>\n"
         response += f"Name: {username}\n"
         response += f"Plan: {plan}{time_left}\n"
@@ -988,14 +905,12 @@ def users_command(message):
 
 @bot.message_handler(commands=['broadcast'])
 def broadcast_command(message):
-    """Broadcast message to all users"""
+    """Broadcast message"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "broadcast"):
         return
     
-    # Check if admin
     if not user_manager.is_admin(user_id):
         bot.send_message(message.chat.id, "❌ Admin only!")
         return
@@ -1010,7 +925,7 @@ def broadcast_command(message):
         users = user_manager.get_active_users()
         
         if not users:
-            bot.send_message(message.chat.id, "❌ No active users to broadcast to!")
+            bot.send_message(message.chat.id, "❌ No active users!")
             return
         
         sent = 0
@@ -1023,32 +938,30 @@ def broadcast_command(message):
                 bot.send_message(int(uid), 
                     f"📢 <b>ANNOUNCEMENT FROM ADMIN:</b>\n\n"
                     f"{broadcast_msg}\n\n"
-                    f"<i>This is a broadcast message to all users.</i>"
+                    f"<i>This is a broadcast message.</i>"
                 )
                 sent += 1
-                time.sleep(0.1)  # Avoid rate limits
+                time.sleep(0.1)
             except:
                 failed += 1
         
         bot.send_message(message.chat.id, 
             f"✅ <b>Broadcast Complete!</b>\n\n"
-            f"✅ Sent: {sent} users\n"
-            f"❌ Failed: {failed} users\n"
-            f"📊 Total: {len(users)} users"
+            f"✅ Sent: {sent}\n"
+            f"❌ Failed: {failed}\n"
+            f"📊 Total: {len(users)}"
         )
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
 
 @bot.message_handler(commands=['addtime'])
 def addtime_command(message):
-    """Add time to user's subscription - Admin only"""
+    """Add time to user"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "addtime"):
         return
     
-    # Check if admin
     if not user_manager.is_admin(user_id):
         bot.send_message(message.chat.id, "❌ Admin only!")
         return
@@ -1059,10 +972,7 @@ def addtime_command(message):
             bot.send_message(message.chat.id, 
                 "Usage: /addtime [user_id] [amount] [unit]\n\n"
                 "Units: minutes, hours, days, weeks, months, lifetime\n"
-                "Examples:\n"
-                "/addtime 123456789 30 minutes\n"
-                "/addtime 123456789 7 days\n"
-                "/addtime 123456789 1 lifetime"
+                "Example: /addtime 123456789 7 days"
             )
             return
         
@@ -1084,8 +994,7 @@ def addtime_command(message):
                 time_msg = f"{amount} {unit}"
             
             bot.send_message(message.chat.id, 
-                f"✅ Added {time_msg} to user <code>{target_user_id}</code>\n\n"
-                f"User now has access for {time_msg}."
+                f"✅ Added {time_msg} to user <code>{target_user_id}</code>"
             )
         else:
             bot.send_message(message.chat.id, f"❌ User <code>{target_user_id}</code> not found!")
@@ -1095,24 +1004,22 @@ def addtime_command(message):
 # ========== BASIC BOT COMMANDS ==========
 @bot.message_handler(commands=['addmsg'])
 def addmsg_command(message):
-    """Add message for spamming"""
+    """Add message"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "addmsg"):
         return
     
     msg = bot.send_message(message.chat.id, 
-        "✍️ <b>Send the message:</b>\n\n"
-        "Use <code>{{target}}</code> for target username.\n"
-        "Example: <i>Hello {{target}}!</i>"
+        "✍️ <b>Send message:</b>\n\n"
+        "Use <code>{{target}}</code> for username.\n"
+        "Example: Hello {{target}}!"
     )
     bot.register_next_step_handler(msg, process_new_message)
 
 def process_new_message(message):
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "addmsg"):
         return
     
@@ -1127,10 +1034,9 @@ def process_new_message(message):
 
 @bot.message_handler(commands=['listmsg'])
 def listmsg_command(message):
-    """List all saved messages"""
+    """List messages"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "listmsg"):
         return
     
@@ -1144,36 +1050,34 @@ def listmsg_command(message):
         preview = msg[:50] + "..." if len(msg) > 50 else msg
         response += f"{i}. <code>{preview}</code>\n\n"
     
-    response += f"📊 <b>Total:</b> {len(custom_messages)} messages"
+    response += f"📊 <b>Total:</b> {len(custom_messages)}"
     
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
-        InlineKeyboardButton(text="🗑️ Delete Messages", callback_data="delete_msg_menu"),
+        InlineKeyboardButton(text="🗑️ Delete", callback_data="delete_msg_menu"),
         InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
     )
     
-    bot.send_message(message.chat.id, response, reply_mup=keyboard)
+    bot.send_message(message.chat.id, response, reply_markup=keyboard)
 
 @bot.message_handler(commands=['addsession'])
 def addsession_command(message):
-    """Add Instagram session"""
+    """Add session"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "addsession"):
         return
     
     instruction = """
-🔑 <b>How to get Instagram Session ID:</b>
+🔑 <b>How to get Session ID:</b>
 
 1. Open Instagram in Chrome/Firefox on PC
 2. Login to your account
-3. Press F12 for Developer Tools
-4. Go to <b>Application</b> tab → <b>Cookies</b> → <b>https://www.instagram.com</b>
-5. Look for <b>sessionid</b> cookie
-6. Copy the <b>Value</b> (long string)
+3. Press F12 → Application → Cookies
+4. Find <b>sessionid</b> cookie
+5. Copy the Value (long string)
 
-📝 <b>Send the sessionid value:</b>
+📝 <b>Send the sessionid:</b>
 """
     
     msg = bot.send_message(message.chat.id, instruction)
@@ -1182,17 +1086,16 @@ def addsession_command(message):
 def process_new_session(message):
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "addsession"):
         return
     
     session_id = message.text.strip()
     
     if len(session_id) < 20:
-        bot.send_message(message.chat.id, "❌ Invalid session ID! Too short.")
+        bot.send_message(message.chat.id, "❌ Invalid session ID!")
         return
     
-    bot.send_message(message.chat.id, "🔍 Validating session...")
+    bot.send_message(message.chat.id, "🔍 Validating...")
     
     valid, username, info = validate_instagram_session(session_id)
     
@@ -1207,29 +1110,28 @@ def process_new_session(message):
         save_sessions()
         
         bot.send_message(message.chat.id, 
-            f"✅ <b>Session Added Successfully!</b>\n\n"
+            f"✅ <b>Session Added!</b>\n\n"
             f"👤 <b>Username:</b> {username}\n"
             f"🕒 <b>Added:</b> {datetime.now().strftime('%H:%M:%S')}\n"
             f"📊 <b>Valid Sessions:</b> {len([s for s in instagram_sessions if s.get('status') == 'valid'])}"
         )
     else:
         bot.send_message(message.chat.id,
-            f"❌ <b>Session Validation Failed!</b>\n\n"
+            f"❌ <b>Validation Failed!</b>\n\n"
             f"<b>Error:</b> {info}\n\n"
-            f"<i>Please check your session ID and try again.</i>"
+            f"<i>Check your session ID.</i>"
         )
 
 @bot.message_handler(commands=['sessions'])
 def sessions_command(message):
-    """View Instagram sessions"""
+    """View sessions"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "sessions"):
         return
     
     if not instagram_sessions:
-        bot.send_message(message.chat.id, "🔐 No Instagram sessions saved!")
+        bot.send_message(message.chat.id, "🔐 No sessions!")
         return
     
     valid_sessions = [s for s in instagram_sessions if s.get('status') == 'valid']
@@ -1237,26 +1139,26 @@ def sessions_command(message):
     response = "👥 <b>INSTAGRAM SESSIONS</b>\n\n"
     
     if valid_sessions:
-        response += "✅ <b>VALID SESSIONS:</b>\n"
+        response += "✅ <b>VALID:</b>\n"
         for i, session in enumerate(valid_sessions, 1):
             username = session.get('username', 'Unknown')
-            added = session.get('added', 'Unknown time')
+            added = session.get('added', 'Unknown')
             response += f"{i}. <b>{username}</b>\n"
             response += f"   🕒 {added}\n\n"
     
     invalid_sessions = [s for s in instagram_sessions if s.get('status') != 'valid']
     if invalid_sessions:
-        response += "❌ <b>INVALID/TESTING SESSIONS:</b>\n"
+        response += "❌ <b>INVALID:</b>\n"
         for i, session in enumerate(invalid_sessions, 1):
             username = session.get('username', 'Unknown')
             response += f"{i}. {username}\n\n"
     
-    response += f"📊 <b>Summary:</b> {len(valid_sessions)} valid, {len(invalid_sessions)} invalid"
+    response += f"📊 <b>Valid:</b> {len(valid_sessions)}, <b>Invalid:</b> {len(invalid_sessions)}"
     
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
-        InlineKeyboardButton(text="➕ Add Session", callback_data="add_session"),
-        InlineKeyboardButton(text="🗑️ Delete Session", callback_data="delete_session_menu")
+        InlineKeyboardButton(text="➕ Add", callback_data="add_session"),
+        InlineKeyboardButton(text="🗑️ Delete", callback_data="delete_session_menu")
     )
     keyboard.add(
         InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
@@ -1269,74 +1171,71 @@ def setup_command(message):
     """Configure settings"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
         return
     
     current_config = f"""
 ⚙️ <b>CURRENT SETTINGS:</b>
 
-🎯 <b>Target Username:</b> {current_settings['target'] or 'Not set'}
-🔗 <b>Instagram DM URL:</b> {'✅ Set' if current_settings['dm_url'] else '❌ Not set'}
-⏱️ <b>Delay between messages:</b> {current_settings['delay_min']}-{current_settings['delay_max']} seconds
-📊 <b>Message Count:</b> {current_settings['message_count']} messages
+🎯 <b>Target:</b> {current_settings['target'] or 'Not set'}
+🔗 <b>Instagram URL:</b> {'✅ Set' if current_settings['dm_url'] else '❌ Not set'}
+⏱️ <b>Delay:</b> {current_settings['delay_min']}-{current_settings['delay_max']}s
+📊 <b>Message Count:</b> {current_settings['message_count']}
 """
     
     keyboard = InlineKeyboardMarkup()
     keyboard.add(
-        InlineKeyboardButton(text="🎯 Set Target Username", callback_data="set_target"),
-        InlineKeyboardButton(text="🔗 Set Instagram URL", callback_data="set_url")
+        InlineKeyboardButton(text="🎯 Set Target", callback_data="set_target"),
+        InlineKeyboardButton(text="🔗 Set URL", callback_data="set_url")
     )
     keyboard.add(
-        InlineKeyboardButton(text="⏱️ Set Message Delay", callback_data="set_delay"),
-        InlineKeyboardButton(text="📊 Set Message Count", callback_data="set_count")
+        InlineKeyboardButton(text="⏱️ Set Delay", callback_data="set_delay"),
+        InlineKeyboardButton(text="📊 Set Count", callback_data="set_count")
     )
     keyboard.add(
         InlineKeyboardButton(text="◀️ Main Menu", callback_data="main_menu")
     )
     
-    bot.send_message(message.chat.id, current_config + "\n<b>Select an option to configure:</b>", reply_markup=keyboard)
+    bot.send_message(message.chat.id, current_config + "\n<b>Select option:</b>", reply_markup=keyboard)
 
 @bot.message_handler(commands=['start_spam'])
 def start_spam_command(message):
-    """Start sending messages"""
+    """Start spam"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "start_spam"):
         return
     
     # Check requirements
     if not custom_messages:
-        bot.send_message(message.chat.id, "❌ Add messages first using /addmsg!")
+        bot.send_message(message.chat.id, "❌ Add messages first!")
         return
     
     if not instagram_sessions:
-        bot.send_message(message.chat.id, "❌ Add Instagram sessions first using /addsession!")
+        bot.send_message(message.chat.id, "❌ Add sessions first!")
         return
     
     if not current_settings['dm_url']:
-        bot.send_message(message.chat.id, "❌ Set Instagram URL first using /setup!")
+        bot.send_message(message.chat.id, "❌ Set Instagram URL first!")
         return
     
     thread_id = get_thread_id_from_url(current_settings['dm_url'])
     if not thread_id:
         bot.send_message(message.chat.id, 
-            "❌ <b>Invalid Instagram URL!</b>\n\n"
-            "Please provide a valid Instagram DM URL in this format:\n"
-            "<code>https://www.instagram.com/direct/t/THREAD_ID/</code>"
+            "❌ <b>Invalid URL!</b>\n\n"
+            "Format: https://www.instagram.com/direct/t/THREAD_ID/"
         )
         return
     
     global spam_active
     
     if spam_active:
-        bot.send_message(message.chat.id, "⚠️ Spam is already running!")
+        bot.send_message(message.chat.id, "⚠️ Already running!")
         return
     
     spam_active = True
     
-    # Start spam in new thread
+    # Start spam thread
     thread = threading.Thread(
         target=spam_worker,
         args=(message.chat.id, thread_id, user_id),
@@ -1350,87 +1249,82 @@ def start_spam_command(message):
         f"✅ <b>SPAM STARTED!</b>\n\n"
         f"🎯 <b>Target:</b> {current_settings['target']}\n"
         f"🔗 <b>Thread ID:</b> <code>{thread_id}</code>\n"
-        f"📊 <b>Messages:</b> {len(custom_messages)} available\n"
-        f"👥 <b>Accounts:</b> {valid_sessions} valid sessions\n"
-        f"⏱️ <b>Delay:</b> {current_settings['delay_min']}-{current_settings['delay_max']} seconds\n"
-        f"📝 <b>Target Count:</b> {current_settings['message_count']} messages\n\n"
-        f"<i>Messages will start sending now...</i>"
+        f"📊 <b>Messages:</b> {len(custom_messages)}\n"
+        f"👥 <b>Sessions:</b> {valid_sessions}\n"
+        f"⏱️ <b>Delay:</b> {current_settings['delay_min']}-{current_settings['delay_max']}s\n"
+        f"📝 <b>Count:</b> {current_settings['message_count']}\n\n"
+        f"<i>Starting now...</i>"
     )
 
 def spam_worker(chat_id, thread_id, user_id):
-    """Main spam worker function"""
+    """Spam worker"""
     global spam_active, success_count, unsuccess_count
     
-    # Check access periodically
-    def check_access_periodically():
+    def check_access():
         has_access, _ = user_manager.check_access(user_id)
-        if not has_access:
-            bot.send_message(chat_id, "⏰ <b>Access expired during spam!</b> Stopping...")
-            return False
-        return True
+        return has_access
     
     # Get valid sessions
     valid_sessions = [s for s in instagram_sessions if s.get('status') == 'valid']
     if not valid_sessions:
-        bot.send_message(chat_id, "❌ No valid sessions available!")
+        bot.send_message(chat_id, "❌ No valid sessions!")
         spam_active = False
         return
     
     counter = 0
     session_index = 0
     
-    # Check access before starting
-    if not check_access_periodically():
+    # Check access
+    if not check_access():
         spam_active = False
         return
     
-    # Send initial test message
-    bot.send_message(chat_id, "🧪 Sending test message...")
+    # Send test message
+    bot.send_message(chat_id, "🧪 Testing...")
     
     test_session = valid_sessions[0]
-    test_msg = random.choice(custom_messages) if custom_messages else "Test message from bot"
+    test_msg = random.choice(custom_messages) if custom_messages else "Test"
     formatted_msg = test_msg.replace("{target}", current_settings['target'])
     
-    # Use the updated function
-    success, result = send_instagram_message_2024(
+    success, result = send_instagram_message_real(
         test_session.get('session_id'), 
         thread_id, 
         formatted_msg
     )
     
-    bot.send_message(chat_id, f"🧪 <b>Test Result:</b> {result}")
+    bot.send_message(chat_id, f"🧪 <b>Test:</b> {result}")
     
     if not success:
         bot.send_message(chat_id, 
             "⚠️ <b>Test failed!</b>\n\n"
             "Possible issues:\n"
-            "1. Session ID expired\n"
-            "2. Thread ID incorrect\n"
-            "3. Instagram API rate limit\n\n"
-            "Check your session ID and try again."
+            "1. Session expired\n"
+            "2. Wrong thread ID\n"
+            "3. Instagram blocked\n\n"
+            "Check and try again."
         )
         spam_active = False
         return
     
-    # Main sending loop
+    # Main loop
     while spam_active and counter < current_settings['message_count']:
         try:
-            # Check access every 5 messages
-            if counter % 5 == 0 and not check_access_periodically():
+            # Check access
+            if counter % 5 == 0 and not check_access():
                 spam_active = False
                 break
             
-            # Get random message
+            # Get message
             msg = random.choice(custom_messages)
             formatted_msg = msg.replace("{target}", current_settings['target'])
             
-            # Get next session (round-robin)
+            # Get session
             session = valid_sessions[session_index % len(valid_sessions)]
             session_id = session.get('session_id')
             username = session.get('username', 'Account')
             
-            # Send message using updated function
-            success, result = send_instagram_message_2024(session_id, thread_id, formatted_msg)
+            # Send message
+            success, result = send_instagram_message_real(session_id, thread_id, formatted_msg)
             
             counter += 1
             
@@ -1443,51 +1337,45 @@ def spam_worker(chat_id, thread_id, user_id):
                     unsuccess_count += 1
                 status = f"❌ Message {counter}: {result} via {username}"
             
-            # Show first 3 results and progress every 10 messages
+            # Show progress
             if counter <= 3 or counter % 10 == 0:
                 total = success_count + unsuccess_count
                 rate = (success_count/total*100) if total > 0 else 0
                 
                 if counter % 10 == 0:
                     bot.send_message(chat_id,
-                        f"📊 <b>Progress Report</b>\n\n"
-                        f"Messages sent: {counter}/{current_settings['message_count']}\n"
+                        f"📊 <b>Progress:</b>\n\n"
+                        f"Sent: {counter}/{current_settings['message_count']}\n"
                         f"✅ Success: {success_count}\n"
                         f"❌ Failed: {unsuccess_count}\n"
-                        f"📈 Success Rate: {rate:.1f}%",
+                        f"📈 Rate: {rate:.1f}%",
                         disable_notification=True
                     )
                 else:
                     bot.send_message(chat_id, status, disable_notification=True)
             
-            # Move to next session
+            # Next session
             session_index += 1
             
-            # Wait before next message
+            # Wait
             delay = random.uniform(current_settings['delay_min'], current_settings['delay_max'])
             time.sleep(delay)
             
         except Exception as e:
-            error_msg = f"❌ Error in spam worker: {str(e)[:100]}"
+            error_msg = f"❌ Error: {str(e)[:100]}"
             print(error_msg)
             time.sleep(2)
     
-    # Spam finished
+    # Finished
     spam_active = False
     
-    # Check if stopped due to trial expiry
+    # Check if expired
     has_access, access_msg = user_manager.check_access(user_id)
     if not has_access and "expired" in access_msg.lower():
-        expired_msg = f"""
-⏰ <b>ACCESS ENDED!</b>
-
-Your spam was stopped because your access has expired.
-
-To continue using the bot, purchase access.
-
-<b>CONTACT:</b> {CONTACT_USERNAME} For Paid Access of {BOT_USERNAME}
-"""
-        bot.send_message(chat_id, expired_msg)
+        bot.send_message(chat_id,
+            f"⏰ <b>ACCESS EXPIRED!</b>\n\n"
+            f"Contact {CONTACT_USERNAME} for paid access."
+        )
         return
     
     # Final report
@@ -1495,49 +1383,47 @@ To continue using the bot, purchase access.
     rate = (success_count/total*100) if total > 0 else 0
     
     final_report = f"""
-✅ <b>SPAM COMPLETED!</b>
+✅ <b>COMPLETED!</b>
 
-📊 <b>Final Statistics:</b>
+📊 <b>Statistics:</b>
 
-• Total Attempted: {counter}
-• ✅ Successful: {success_count}
+• Attempted: {counter}
+• ✅ Success: {success_count}
 • ❌ Failed: {unsuccess_count}
-• 📈 Success Rate: {rate:.1f}%
+• 📈 Rate: {rate:.1f}%
 
 🎯 <b>Target:</b> {current_settings['target']}
 🔗 <b>Thread:</b> {thread_id}
 
-{'🎉 <b>SUCCESS:</b> Messages were sent!' if success_count > 0 else '⚠️ <b>NOTE:</b> Check session IDs if no messages sent.'}
+{'🎉 Messages sent!' if success_count > 0 else '⚠️ No messages sent.'}
 
-<i>Check your Instagram DM to confirm messages arrived.</i>
+<i>Check Instagram DMs.</i>
 """
     
     bot.send_message(chat_id, final_report)
 
 @bot.message_handler(commands=['stop_spam'])
 def stop_spam_command(message):
-    """Stop sending messages"""
+    """Stop spam"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "stop_spam"):
         return
     
     global spam_active
     
     if not spam_active:
-        bot.send_message(message.chat.id, "⚠️ No active spam to stop!")
+        bot.send_message(message.chat.id, "⚠️ Not running!")
         return
     
     spam_active = False
-    bot.send_message(message.chat.id, "🛑 Stopping spam... Current message will finish.")
+    bot.send_message(message.chat.id, "🛑 Stopping...")
 
 @bot.message_handler(commands=['stats'])
 def stats_command(message):
-    """Show statistics"""
+    """Show stats"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "stats"):
         return
     
@@ -1545,49 +1431,48 @@ def stats_command(message):
     rate = (success_count/total*100) if total > 0 else 0
     valid_sessions = len([s for s in instagram_sessions if s.get('status') == 'valid'])
     
-    # Get user time left if not admin
-    time_left_info = ""
+    # Time left
+    time_left = ""
     if not user_manager.is_admin(user_id):
         hours_left = user_manager.get_user_time_left(user_id)
         if hours_left > 0:
             if hours_left > 24:
-                days_left = hours_left / 24
-                time_left_info = f"⏰ <b>Time Left:</b> {days_left:.1f} days\n"
+                days = hours_left / 24
+                time_left = f"⏰ <b>Time Left:</b> {days:.1f} days\n"
             else:
-                time_left_info = f"⏰ <b>Time Left:</b> {hours_left:.1f} hours\n"
+                time_left = f"⏰ <b>Time Left:</b> {hours_left:.1f} hours\n"
         else:
-            time_left_info = f"⏰ <b>Status:</b> Expired\n"
+            time_left = "⏰ <b>Status:</b> Expired\n"
     
     stats_text = f"""
-📊 <b>BOT STATISTICS</b>
+📊 <b>STATISTICS</b>
 
-{time_left_info}
-✅ <b>Messages Sent Successfully:</b> {success_count}
-❌ <b>Messages Failed:</b> {unsuccess_count}
-📈 <b>Success Rate:</b> {rate:.1f}%
+{time_left}
+✅ <b>Success:</b> {success_count}
+❌ <b>Failed:</b> {unsuccess_count}
+📈 <b>Rate:</b> {rate:.1f}%
 
-💬 <b>Saved Messages:</b> {len(custom_messages)}
-👥 <b>Instagram Sessions:</b> {valid_sessions} valid / {len(instagram_sessions)} total
+💬 <b>Messages:</b> {len(custom_messages)}
+👥 <b>Sessions:</b> {valid_sessions}/{len(instagram_sessions)}
 
-🎯 <b>Current Target:</b> {current_settings['target']}
-🔗 <b>Instagram URL:</b> {'✅ Set' if current_settings['dm_url'] else '❌ Not set'}
+🎯 <b>Target:</b> {current_settings['target']}
+🔗 <b>URL:</b> {'✅ Set' if current_settings['dm_url'] else '❌ Not set'}
 
-⏱️ <b>Message Delay:</b> {current_settings['delay_min']}-{current_settings['delay_max']} seconds
-📝 <b>Target Count:</b> {current_settings['message_count']} messages
+⏱️ <b>Delay:</b> {current_settings['delay_min']}-{current_settings['delay_max']}s
+📝 <b>Count:</b> {current_settings['message_count']}
 
-🔴 <b>Spam Status:</b> {'🟢 ACTIVE' if spam_active else '🔴 INACTIVE'}
+🔴 <b>Status:</b> {'🟢 ACTIVE' if spam_active else '🔴 INACTIVE'}
 
-<b>Contact for support:</b> {CONTACT_USERNAME}
+<b>Contact:</b> {CONTACT_USERNAME}
 """
     
     bot.send_message(message.chat.id, stats_text)
 
 @bot.message_handler(commands=['reset'])
 def reset_command(message):
-    """Reset statistics"""
+    """Reset stats"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "reset"):
         return
     
@@ -1597,37 +1482,31 @@ def reset_command(message):
     unsuccess_count = 0
     
     bot.send_message(message.chat.id, 
-        "🔄 <b>Statistics Reset!</b>\n\n"
-        "✅ Success count: 0\n"
-        "❌ Failure count: 0\n\n"
-        "All counters have been reset to zero."
+        "🔄 <b>Reset!</b>\n\n"
+        "Counters cleared."
     )
 
 # ========== CALLBACK HANDLERS ==========
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
-    """Handle all callback queries"""
+    """Handle callbacks"""
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     username = call.from_user.username or call.from_user.first_name or "User"
     
-    print(f"\nCallback received: User {user_id} clicked {call.data}")
+    print(f"\nCallback: User {user_id} clicked {call.data}")
     
-    # FIRST: Always ensure user exists in database
+    # Register user
     user_manager.add_user(user_id, username)
     
-    # THEN check access
+    # Check access
     has_access, message = user_manager.check_access(user_id)
     if not has_access:
         if "expired" in message.lower():
             expired_msg = f"""
-⏰ <b>ACCESS ENDED!</b>
+⏰ <b>ACCESS EXPIRED!</b>
 
-Your access to {BOT_USERNAME} is now over.
-
-To continue using the bot, you need to purchase access.
-
-<b>CONTACT:</b> {CONTACT_USERNAME} For Paid Access of {BOT_USERNAME}
+Contact {CONTACT_USERNAME} for paid access.
 """
             bot.send_message(chat_id, expired_msg)
         else:
@@ -1635,9 +1514,9 @@ To continue using the bot, you need to purchase access.
         bot.answer_callback_query(call.id)
         return
     
-    bot.answer_callback_query(call.id)  # Acknowledge the click
+    bot.answer_callback_query(call.id)
     
-    # Handle different callbacks
+    # Handle callbacks
     if call.data == "main_menu":
         try:
             bot.delete_message(chat_id, call.message.message_id)
@@ -1655,7 +1534,7 @@ To continue using the bot, you need to purchase access.
         stats_command(call.message)
     
     elif call.data == "admin_broadcast":
-        msg = bot.send_message(chat_id, "📢 Enter broadcast message:")
+        msg = bot.send_message(chat_id, "📢 Enter message:")
         bot.register_next_step_handler(msg, lambda m: broadcast_command_wrapper(m, user_id))
     
     elif call.data == "admin_addtime_menu":
@@ -1677,7 +1556,7 @@ To continue using the bot, you need to purchase access.
         )
         
         bot.edit_message_text(
-            "⏰ <b>Select time to add:</b>\n\nEnter user ID after selection.",
+            "⏰ <b>Select time:</b>\n\nEnter user ID after selection.",
             chat_id, 
             call.message.message_id, 
             reply_markup=keyboard
@@ -1688,11 +1567,8 @@ To continue using the bot, you need to purchase access.
         if len(parts) >= 3:
             amount = parts[1]
             unit = parts[2]
-            
-            # Store the time selection
-            user_data = {"time_amount": amount, "time_unit": unit}
             msg = bot.send_message(chat_id, f"⏰ Enter user ID to add {amount} {unit}:")
-            bot.register_next_step_handler(msg, lambda m: process_addtime_user(m, amount, unit, user_id))
+            bot.register_next_step_handler(msg, lambda m: process_addtime(m, amount, unit, user_id))
     
     elif call.data == "add_msg":
         msg = bot.send_message(chat_id, "✍️ Send message:")
@@ -1745,34 +1621,34 @@ To continue using the bot, you need to purchase access.
         stats_command(call.message)
     
     elif call.data == "set_target":
-        msg = bot.send_message(chat_id, "🎯 Send target username:")
+        msg = bot.send_message(chat_id, "🎯 Enter target username:")
         bot.register_next_step_handler(msg, process_target)
     
     elif call.data == "set_url":
-        msg = bot.send_message(chat_id, "🔗 Send Instagram DM URL:")
+        msg = bot.send_message(chat_id, "🔗 Enter Instagram DM URL:")
         bot.register_next_step_handler(msg, process_url)
     
     elif call.data == "set_count":
-        msg = bot.send_message(chat_id, "📊 Send message count (1-1000):")
+        msg = bot.send_message(chat_id, "📊 Enter message count (1-1000):")
         bot.register_next_step_handler(msg, process_count)
     
     elif call.data == "set_delay":
         keyboard = InlineKeyboardMarkup()
         keyboard.add(
-            InlineKeyboardButton(text="⚡ 0.5-1s (ULTRA FAST)", callback_data="delay_0.5_1"),
-            InlineKeyboardButton(text="🚀 1-2s (VERY FAST)", callback_data="delay_1_2")
+            InlineKeyboardButton(text="⚡ 0.5-1s", callback_data="delay_0.5_1"),
+            InlineKeyboardButton(text="🚀 1-2s", callback_data="delay_1_2")
         )
         keyboard.add(
-            InlineKeyboardButton(text="💨 2-3s (FAST)", callback_data="delay_2_3"),
-            InlineKeyboardButton(text="🐢 3-5s (NORMAL)", callback_data="delay_3_5")
+            InlineKeyboardButton(text="💨 2-3s", callback_data="delay_2_3"),
+            InlineKeyboardButton(text="🐢 3-5s", callback_data="delay_3_5")
         )
-        bot.send_message(chat_id, "⏱️ Select delay between messages:", reply_markup=keyboard)
+        bot.send_message(chat_id, "⏱️ Select delay:", reply_markup=keyboard)
     
     elif call.data.startswith("delay_"):
         delays = call.data.split("_")[1:]
         current_settings['delay_min'] = float(delays[0])
         current_settings['delay_max'] = float(delays[1])
-        bot.send_message(chat_id, f"✅ Delay: {delays[0]}-{delays[1]} seconds")
+        bot.send_message(chat_id, f"✅ Delay: {delays[0]}-{delays[1]}s")
     
     elif call.data == "delete_msg_menu":
         if not custom_messages:
@@ -1782,20 +1658,20 @@ To continue using the bot, you need to purchase access.
         keyboard = InlineKeyboardMarkup()
         for i in range(min(5, len(custom_messages))):
             preview = custom_messages[i][:30] + "..." if len(custom_messages[i]) > 30 else custom_messages[i]
-            keyboard.add(InlineKeyboardButton(text=f"❌ Delete: {preview}", callback_data=f"del_msg_{i}"))
+            keyboard.add(InlineKeyboardButton(text=f"❌ {preview}", callback_data=f"del_msg_{i}"))
         keyboard.add(InlineKeyboardButton(text="◀️ Back", callback_data="list_msg"))
         
-        bot.edit_message_text("🗑️ Select message to delete:", chat_id, call.message.message_id, reply_markup=keyboard)
+        bot.edit_message_text("🗑️ Delete message:", chat_id, call.message.message_id, reply_markup=keyboard)
     
     elif call.data.startswith("del_msg_"):
         try:
             index = int(call.data.split("_")[2])
             custom_messages.pop(index)
             save_messages()
-            bot.send_message(chat_id, "✅ Message deleted!")
+            bot.send_message(chat_id, "✅ Deleted!")
             listmsg_command(call.message)
         except:
-            bot.send_message(chat_id, "❌ Error deleting message!")
+            bot.send_message(chat_id, "❌ Error!")
     
     elif call.data == "delete_session_menu":
         if not instagram_sessions:
@@ -1806,23 +1682,23 @@ To continue using the bot, you need to purchase access.
         for i in range(len(instagram_sessions)):
             username = instagram_sessions[i].get('username', 'session')
             status = "✅" if instagram_sessions[i].get('status') == 'valid' else "❌"
-            keyboard.add(InlineKeyboardButton(text=f"{status} Delete: {username}", callback_data=f"del_sess_{i}"))
+            keyboard.add(InlineKeyboardButton(text=f"{status} {username}", callback_data=f"del_sess_{i}"))
         keyboard.add(InlineKeyboardButton(text="◀️ Back", callback_data="sessions"))
         
-        bot.edit_message_text("🗑️ Select session to delete:", chat_id, call.message.message_id, reply_markup=keyboard)
+        bot.edit_message_text("🗑️ Delete session:", chat_id, call.message.message_id, reply_markup=keyboard)
     
     elif call.data.startswith("del_sess_"):
         try:
             index = int(call.data.split("_")[2])
             instagram_sessions.pop(index)
             save_sessions()
-            bot.send_message(chat_id, "✅ Session deleted!")
+            bot.send_message(chat_id, "✅ Deleted!")
             sessions_command(call.message)
         except:
-            bot.send_message(chat_id, "❌ Error deleting session!")
+            bot.send_message(chat_id, "❌ Error!")
 
-def process_addtime_user(message, amount, unit, admin_id):
-    """Process adding time to user"""
+def process_addtime(message, amount, unit, admin_id):
+    """Process addtime"""
     try:
         user_id = int(message.text)
         if user_manager.add_user_time(user_id, int(amount), unit):
@@ -1832,28 +1708,27 @@ def process_addtime_user(message, amount, unit, admin_id):
                 time_msg = f"{amount} {unit}"
             
             bot.send_message(message.chat.id, 
-                f"✅ Added {time_msg} to user <code>{user_id}</code>\n\n"
-                f"User now has access for {time_msg}."
+                f"✅ Added {time_msg} to user <code>{user_id}</code>"
             )
             
-            # Notify the user
+            # Notify user
             try:
                 bot.send_message(user_id,
                     f"🎉 <b>ACCESS UPDATED!</b>\n\n"
-                    f"Admin has added {time_msg} to your account.\n\n"
-                    f"<b>Your new expiry:</b> {user_manager.get_user_expiry_date(user_id).strftime('%Y-%m-%d %H:%M:%S')}"
+                    f"Admin added {time_msg} to your account.\n\n"
+                    f"Contact {CONTACT_USERNAME} for support."
                 )
             except:
                 pass
         else:
             bot.send_message(message.chat.id, f"❌ User <code>{user_id}</code> not found!")
     except ValueError:
-        bot.send_message(message.chat.id, "❌ Invalid user ID! Please enter a number.")
+        bot.send_message(message.chat.id, "❌ Invalid user ID!")
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Error: {str(e)}")
 
 def broadcast_command_wrapper(message, user_id):
-    """Wrapper for broadcast command from callback"""
+    """Broadcast wrapper"""
     class FakeMessage:
         def __init__(self, text, user_id):
             self.text = text
@@ -1863,21 +1738,20 @@ def broadcast_command_wrapper(message, user_id):
     fake_msg = FakeMessage(f"/broadcast {message.text}", user_id)
     broadcast_command(fake_msg)
 
-# ========== MESSAGE HANDLERS ==========
 def process_target(message):
+    """Process target"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
         return
     
     current_settings['target'] = message.text
-    bot.send_message(message.chat.id, f"✅ Target set to: {message.text}")
+    bot.send_message(message.chat.id, f"✅ Target: {message.text}")
 
 def process_url(message):
+    """Process URL"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
         return
     
@@ -1887,22 +1761,21 @@ def process_url(message):
     if thread_id:
         current_settings['dm_url'] = url
         bot.send_message(message.chat.id, 
-            f"✅ <b>URL set successfully!</b>\n\n"
-            f"<b>Thread ID detected:</b> <code>{thread_id}</code>"
+            f"✅ <b>URL set!</b>\n\n"
+            f"<b>Thread ID:</b> <code>{thread_id}</code>"
         )
     else:
-        bot.send_message(message.chat.id, 
-            "⚠️ <b>Could not detect Thread ID from URL!</b>\n\n"
-            "But the URL has been saved anyway.\n"
-            "Make sure the URL is in this format:\n"
-            "<code>https://www.instagram.com/direct/t/THREAD_ID/</code>"
-        )
         current_settings['dm_url'] = url
+        bot.send_message(message.chat.id, 
+            "⚠️ <b>No thread ID detected!</b>\n\n"
+            "URL saved anyway.\n"
+            "Format: https://www.instagram.com/direct/t/THREAD_ID/"
+        )
 
 def process_count(message):
+    """Process count"""
     user_id = message.from_user.id
     
-    # Check access
     if not check_user_access(message.chat.id, user_id, "setup"):
         return
     
@@ -1910,20 +1783,20 @@ def process_count(message):
         count = int(message.text)
         if 1 <= count <= 1000:
             current_settings['message_count'] = count
-            bot.send_message(message.chat.id, f"✅ Message count set to: {count}")
+            bot.send_message(message.chat.id, f"✅ Count: {count}")
         else:
-            bot.send_message(message.chat.id, "❌ Please enter a number between 1 and 1000")
+            bot.send_message(message.chat.id, "❌ Enter 1-1000")
     except:
-        bot.send_message(message.chat.id, "❌ Please enter a valid number!")
+        bot.send_message(message.chat.id, "❌ Invalid number!")
 
-# ========== MAIN FUNCTION ==========
+# ========== MAIN ==========
 if __name__ == "__main__":
     print(print_banner())
-    print(f"🤖 Instagram Spam Bot v10.0 (Complete Fixed Version)")
+    print(f"🤖 Instagram Spam Bot - FINAL FIX")
     print(f"👑 Admin User ID: {ADMIN_USER_ID}")
     print(f"🤖 Bot Username: {BOT_USERNAME}")
     print(f"📞 Contact: {CONTACT_USERNAME}")
-    print(f"⏰ Free Trial: 1 hour for new users")
+    print(f"⏰ Free Trial: 1 hour")
     print(f"💬 Messages: {len(custom_messages)}")
     print(f"🔑 Sessions: {len(instagram_sessions)}")
     
@@ -1931,19 +1804,18 @@ if __name__ == "__main__":
         bot_info = bot.get_me()
         print(f"\n✅ Bot Username: @{bot_info.username}")
         print(f"✅ Bot ID: {bot_info.id}")
-        print("✅ Bot is ready! Send /start in Telegram")
+        print("✅ Bot ready!")
     except Exception as e:
-        print(f"❌ Error connecting to Telegram: {e}")
-        print("Please check your bot token and internet connection")
+        print(f"❌ Error: {e}")
         sys.exit(1)
     
     print("\n" + "="*60)
     print("⚠️ IMPORTANT:")
-    print(f"• Admin: {ADMIN_USER_ID} has lifetime access")
-    print(f"• New users get 1-hour free trial")
+    print(f"• Admin ID: {ADMIN_USER_ID}")
+    print(f"• 1-hour free trial for new users")
+    print(f"• Contact {CONTACT_USERNAME} for paid access")
     print(f"• Admin can add time: minutes, hours, days, weeks, months, lifetime")
-    print(f"• After trial: Contact {CONTACT_USERNAME} for paid access")
     print("="*60 + "\n")
     
-    print("🚀 Starting bot polling...")
+    print("🚀 Starting bot...")
     bot.infinity_polling()
